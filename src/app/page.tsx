@@ -1,84 +1,51 @@
 "use client";
-import Image from "next/image";
-import * as React from "react";
-import {
-    Calculator,
-    Calendar,
-    CreditCard,
-    Settings,
-    Smile,
-    User,
-} from "lucide-react";
-import {
-    CommandDialog,
-    CommandEmpty,
-    CommandGroup,
-    CommandInput,
-    CommandItem,
-    CommandList,
-    CommandSeparator,
-    CommandShortcut,
-} from "@/components/ui/command";
+import { useState, useCallback, useEffect } from "react";
+import { useTheme } from "next-themes";
+import WebSocket from "@tauri-apps/plugin-websocket";
+import { Button } from "@/components/ui/button";
+import Link from "next/link";
+import { fetch } from "@tauri-apps/plugin-http";
+import { info } from "@tauri-apps/plugin-log";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Icons } from "@/components/icons";
+import WebSocketManager from "./utils/WebSocketManager";
+import HTTPRequestManager, { Methods } from "./utils/HTTPRequestManager";
+
 export default function Home() {
-    const [open, setOpen] = React.useState(false);
+    const [message, setMessage] = useState("Hello");
+    const [connected, setConnected] = useState("Click to connect");
 
-    React.useEffect(() => {
-        const down = (e: KeyboardEvent) => {
-            if (e.key === "j" && (e.metaKey || e.ctrlKey)) {
-                e.preventDefault();
-                setOpen((open) => !open);
+    const wsManager = WebSocketManager.getInstance();
+    const httpManager = HTTPRequestManager.getInstance();
+
+    const wsInit = useCallback(async () => {
+        wsManager.addSubscriptionPath(
+            "/subscribe/chat/messages/user1",
+            (msg: any) => {
+                console.log("Message Received");
+                setMessage(msg.content);
             }
-        };
+        );
 
-        document.addEventListener("keydown", down);
-        return () => document.removeEventListener("keydown", down);
-    }, []);
+        await wsManager.start();
+        setConnected("Connected!");
+    }, [wsManager]);
+
+    const fetchData = async () => {
+        const data = await httpManager
+            .handleRequest("chat/chatRoom/user1", Methods.GET)
+            .then((r) => {
+                console.log("Sent!");
+            });
+    };
+
     return (
-        <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-            <p className="text-sm text-muted-foreground">
-                Press{" "}
-                <kbd className="pointer-events-none inline-flex h-5 select-none items-center gap-1 rounded border bg-muted px-1.5 font-mono text-[10px] font-medium text-muted-foreground opacity-100">
-                    <span className="text-xs">⌘</span>J
-                </kbd>
-            </p>
-            <CommandDialog open={open} onOpenChange={setOpen}>
-                <CommandInput placeholder="Type a command or search..." />
-                <CommandList>
-                    <CommandEmpty>No results found.</CommandEmpty>
-                    <CommandGroup heading="Suggestions">
-                        <CommandItem>
-                            <Calendar />
-                            <span>Calendar</span>
-                        </CommandItem>
-                        <CommandItem>
-                            <Smile />
-                            <span>Search Emoji</span>
-                        </CommandItem>
-                        <CommandItem>
-                            <Calculator />
-                            <span>Calculator</span>
-                        </CommandItem>
-                    </CommandGroup>
-                    <CommandSeparator />
-                    <CommandGroup heading="Settings">
-                        <CommandItem>
-                            <User />
-                            <span>Profile</span>
-                            <CommandShortcut>⌘P</CommandShortcut>
-                        </CommandItem>
-                        <CommandItem>
-                            <CreditCard />
-                            <span>Billing</span>
-                            <CommandShortcut>⌘B</CommandShortcut>
-                        </CommandItem>
-                        <CommandItem>
-                            <Settings />
-                            <span>Settings</span>
-                            <CommandShortcut>⌘S</CommandShortcut>
-                        </CommandItem>
-                    </CommandGroup>
-                </CommandList>
-            </CommandDialog>
-        </div>
+        <>
+            <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
+                <Button onClick={fetchData}>{message}</Button>
+                <Button onClick={wsInit}>{connected}</Button>
+            </div>
+        </>
     );
 }
