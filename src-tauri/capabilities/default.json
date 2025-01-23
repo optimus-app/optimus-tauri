@@ -6,6 +6,12 @@
     "main"
   ],
   "permissions": [
-    "core:default"
+    "core:default",
+    "websocket:default",
+    {
+      "identifier": "http:default",
+      "allow": [{ "url": "http://localhost:8080/*" }]
+    },
+    "log:default"
   ]
 }
