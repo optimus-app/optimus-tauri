@@ -14,7 +14,7 @@ import HTTPRequestManager, { Methods } from "./utils/HTTPRequestManager";
 
 export default function Home() {
     const [message, setMessage] = useState("Hello");
-    const [connected, setConnected] = useState(false);
+    const [connected, setConnected] = useState("Click to connect");
 
     const wsManager = WebSocketManager.getInstance();
     const httpManager = HTTPRequestManager.getInstance();
@@ -29,7 +29,7 @@ export default function Home() {
         );
 
         await wsManager.start();
-        setConnected(true);
+        setConnected("Connected!");
     }, [wsManager]);
 
     const fetchData = async () => {
