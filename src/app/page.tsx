@@ -8,6 +8,7 @@ import { invoke } from "@tauri-apps/api/core";
 export default function Home() {
     const [message, setMessage] = useState("Click to spawn window");
     const [connected, setConnected] = useState("Click to connect");
+    const [number, setNumber] = useState(1);
 
     const wsManager = WebSocketManager.getInstance();
     const httpManager = HTTPRequestManager.getInstance();
@@ -26,7 +27,9 @@ export default function Home() {
     }, [wsManager]);
 
     const createWindow = async () => {
+        console.log(number.toString());
         invoke("create_window");
+        setNumber(number + 1);
     };
 
     const fetchData = async () => {
