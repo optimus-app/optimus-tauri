@@ -52,7 +52,7 @@ class WebSocketManager {
         console.log(rawDest);
         console.log(rawBody);
 
-        let body = JSON.parse(rawBody.replace(/\0/g, ""));
+        const body = JSON.parse(rawBody.replace(/\0/g, ""));
 
         return { destination, body };
     }
