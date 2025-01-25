@@ -15,42 +15,44 @@ import {
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent } from "@/components/ui/popover";
 
-const frameworks = [
-    {
-        value: "next.js",
-        label: "Next.js",
-    },
-    {
-        value: "sveltekit",
-        label: "SvelteKit",
-    },
-    {
-        value: "nuxt.js",
-        label: "Nuxt.js",
-    },
-    {
-        value: "remix",
-        label: "Remix",
-    },
-    {
-        value: "astro",
-        label: "Astro",
-    },
-];
-
+/**
+ * Modified so that:
+ * 1) Each item shows its label and, on the right side (small gray text), the item's value.
+ * 2) Tab auto-fills the *value* into the input (instead of the label).
+ * 3) Searching is possible by both the label and the value.
+ *
+ * You can supply any groups array with shape:
+ * [
+ *   {
+ *     label?: string;
+ *     items: { value: string; label: string }[];
+ *   }
+ * ]
+ * and optionally control open state via `open` and `onOpenChange`.
+ */
 export function CommandLineInput({
     onAction,
-    inputWidth = "200px", // Customizable input width
-    groups = [{ label: "Suggestions", items: frameworks }], // Supports multiple groups with labels
+    inputWidth = "200px",
+    groups = [],
+    open,
+    onOpenChange,
 }: {
-    onAction?: (currentValue: string, currentLabel: string) => void; // Callback with both value and label
-    inputWidth?: string; // Customizable input width
-    groups?: { label?: string; items: { value: string; label: string }[] }[]; // Data with groups and labels
+    onAction?: (currentValue: string, currentLabel: string) => void;
+    inputWidth?: string;
+    groups?: { label?: string; items: { value: string; label: string }[] }[];
+    open?: boolean;
+    onOpenChange?: (open: boolean) => void;
 }) {
-    const [open, setOpen] = React.useState(false);
     const [search, setSearch] = React.useState("");
     const [value, setValue] = React.useState("");
-    const inputRef = React.useRef<HTMLInputElement>(null); // Ref for the input field
+    const inputRef = React.useRef<HTMLInputElement>(null);
+
+    // Automatically focus the input field when the dropdown is opened
+    React.useEffect(() => {
+        if (open) {
+            inputRef.current?.focus();
+        }
+    }, [open]);
 
     // Handle `Command + K` or `Ctrl + K` shortcut
     React.useEffect(() => {
@@ -61,8 +63,8 @@ export function CommandLineInput({
                 (!isMac && e.ctrlKey && e.key === "k")
             ) {
                 e.preventDefault();
-                inputRef.current?.focus(); // Focus the input field
-                setOpen(true); // Open the dropdown
+                inputRef.current?.focus();
+                onOpenChange?.(true);
             }
         };
 
@@ -70,7 +72,7 @@ export function CommandLineInput({
         return () => {
             window.removeEventListener("keydown", handleShortcut);
         };
-    }, []);
+    }, [onOpenChange]);
 
     // Handle keydown events for autocomplete (Tab, Enter, Escape)
     const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -80,75 +82,57 @@ export function CommandLineInput({
 
         if (e.key === "Enter" && highlightedItem) {
             // Select the highlighted item with Enter
-            const currentValue = highlightedItem.getAttribute("value");
-            const currentLabel = highlightedItem.textContent?.trim();
+            const currentValue =
+                highlightedItem.getAttribute("data-item-value");
+            const currentLabel =
+                highlightedItem.getAttribute("data-item-label");
             if (currentValue && currentLabel) {
-                onAction?.(currentValue, currentLabel); // Trigger onAction with value and label
-                setValue(currentLabel); // Set the selected value
-                setSearch(""); // Clear the search
-                setOpen(false); // Close the dropdown
-                inputRef.current?.blur(); // Blur the input after selection
+                onAction?.(currentValue, currentLabel);
+                setValue(currentValue); // store the value in state
+                setSearch("");
+                onOpenChange?.(false);
+                inputRef.current?.blur();
             }
         } else if (e.key === "Tab" && highlightedItem) {
-            // Autofill with the highlighted option on Tab, but keep the dropdown open
+            // Autofill the *value* into the input with Tab
             e.preventDefault();
-            const currentLabel = highlightedItem.textContent?.trim();
-            if (currentLabel) {
-                setSearch(currentLabel); // Autofill the input with the label
+            const currentValue =
+                highlightedItem.getAttribute("data-item-value");
+            if (currentValue) {
+                setSearch(currentValue);
             }
         } else if (e.key === "Escape") {
-            // Close the dropdown on Escape
-            setOpen(false);
-            inputRef.current?.blur(); // Remove focus from the input field
+            onOpenChange?.(false);
+            inputRef.current?.blur();
         }
     };
 
     return (
         <div className="flex items-center">
-            <Popover open={open} onOpenChange={setOpen}>
+            <Popover open={open} onOpenChange={onOpenChange}>
                 <Command>
                     <PopoverPrimitive.Anchor asChild>
                         <CommandPrimitive.Input
                             asChild
                             value={search}
                             onValueChange={setSearch}
-                            onKeyDown={handleKeyDown} // Handle keydown events
-                            onMouseDown={() =>
-                                setOpen((open) => !!search || !open)
-                            }
-                            onFocus={() => setOpen(true)}
-                            onBlur={() => {
-                                // Preserve the input value but keep the dropdown closed
-                                setSearch((prev) => prev);
-                            }}
+                            placeholder="Select framework..."
+                            onKeyDown={handleKeyDown}
+                            onFocus={() => onOpenChange?.(true)}
+                            ref={inputRef}
+                            style={{ width: inputWidth }}
+                            className="w-full"
                         >
-                            <Input
-                                ref={inputRef} // Attach the ref to the input
-                                placeholder="Select framework..."
-                                style={{ width: inputWidth }} // Apply customizable width
-                                className="w-full"
-                            />
+                            <Input />
                         </CommandPrimitive.Input>
                     </PopoverPrimitive.Anchor>
-                    {!open && (
-                        <CommandList aria-hidden="true" className="hidden" />
-                    )}
                     <PopoverContent
                         asChild
                         onOpenAutoFocus={(e) => e.preventDefault()}
-                        onInteractOutside={(e) => {
-                            if (
-                                e.target instanceof Element &&
-                                e.target.hasAttribute("cmdk-input")
-                            ) {
-                                e.preventDefault();
-                            }
-                        }}
-                        style={{ width: inputWidth }} // Apply customizable popover width
-                        className="p-0"
                     >
                         <CommandList>
-                            <CommandEmpty>No framework found.</CommandEmpty>
+                            <CommandEmpty>No items found.</CommandEmpty>
+
                             {groups.map((group, idx) => (
                                 <CommandGroup key={idx}>
                                     {group.label && (
@@ -156,30 +140,37 @@ export function CommandLineInput({
                                             {group.label}
                                         </div>
                                     )}
-                                    {group.items.map((item) => (
-                                        <CommandItem
-                                            key={item.value}
-                                            value={item.value}
-                                            className="hover:bg-muted hover:text-foreground" // Default highlighting
-                                            onMouseDown={(e) =>
-                                                e.preventDefault()
-                                            }
-                                            onSelect={() => {
-                                                onAction?.(
-                                                    item.value,
-                                                    item.label
-                                                ); // Pass both value and label to onAction
-                                                setValue(item.label); // Set the selected value
-                                                setSearch(""); // Clear the search
-                                                setOpen(false); // Close the dropdown
-                                                inputRef.current?.blur(); // Blur the input after selection
-                                            }}
-                                        >
-                                            <span className="mr-6" />{" "}
-                                            {/* Preserve spacing */}
-                                            {item.label}
-                                        </CommandItem>
-                                    ))}
+                                    {group.items.map((item) => {
+                                        // Combine item.value and item.label
+                                        // so that users can search by either
+                                        const combinedSearchValue = `${item.value} ${item.label}`;
+                                        return (
+                                            <CommandItem
+                                                key={item.value}
+                                                value={combinedSearchValue}
+                                                // We'll store the actual value and label in data attributes
+                                                data-item-value={item.value}
+                                                data-item-label={item.label}
+                                                onSelect={() => {
+                                                    onAction?.(
+                                                        item.value,
+                                                        item.label
+                                                    );
+                                                    setValue(item.value);
+                                                    setSearch("");
+                                                    onOpenChange?.(false);
+                                                }}
+                                            >
+                                                <div className="flex w-full items-center justify-between">
+                                                    <span>{item.label}</span>
+                                                    {/* On the right side, show the value in small text */}
+                                                    <span className="ml-2 text-sm text-gray-400">
+                                                        {item.value}
+                                                    </span>
+                                                </div>
+                                            </CommandItem>
+                                        );
+                                    })}
                                 </CommandGroup>
                             ))}
                         </CommandList>
@@ -189,3 +180,5 @@ export function CommandLineInput({
         </div>
     );
 }
+
+export default CommandLineInput;

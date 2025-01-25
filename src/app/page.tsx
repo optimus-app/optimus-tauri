@@ -5,18 +5,13 @@ import { CommandLineInput } from "./components/command-line";
 import WebSocketManager from "./utils/WebSocketManager";
 import HTTPRequestManager, { Methods } from "./utils/HTTPRequestManager";
 import { invoke } from "@tauri-apps/api/core";
-import {
-    Command,
-    CommandEmpty,
-    CommandGroup,
-    CommandInput,
-    CommandList,
-} from "@/components/ui/command";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 export default function Home() {
     const [message, setMessage] = useState("Click to spawn window");
     const [connected, setConnected] = useState("Click to connect");
     const [isFocused, setIsFocused] = useState(false);
+    const [openCommandLine, setOpenCommandLine] = useState(false);
 
     const wsManager = WebSocketManager.getInstance();
     const httpManager = HTTPRequestManager.getInstance();
@@ -51,6 +46,23 @@ export default function Home() {
         console.log(`You selected: ${selectedValue}`);
     };
 
+    useEffect(() => {
+        const setupFocusListener = async () => {
+            const unlisten = await getCurrentWindow().onFocusChanged(
+                ({ payload: focused }) => {
+                    console.log("Focus changed, window is focused? " + focused);
+                    setIsFocused(focused); // Update the focus state
+                    setOpenCommandLine(focused); // Open CommandLineInput when focused
+                }
+            );
+
+            return () => {
+                unlisten(); // Cleanup on component unmount
+            };
+        };
+        setupFocusListener();
+    }, []);
+
     return (
         <>
             <div className="grid items-center justify-items-center min-h-screen p-8 pb-20 sm:p-20 font-[family-name:var(--font-geist-sans)]">
@@ -61,10 +73,12 @@ export default function Home() {
                         {
                             label: "Functions",
                             items: [
-                                { value: "im", label: "Instant Messaging: im" },
+                                { value: "im", label: "Instant Messaging" },
                             ],
                         },
                     ]}
+                    open={openCommandLine} // Bind visibility to window focus
+                    onOpenChange={setOpenCommandLine} // Allow external control of visibility
                 />
                 <Button onClick={createWindow}>{message}</Button>
                 <Button onClick={wsInit}>{connected}</Button>

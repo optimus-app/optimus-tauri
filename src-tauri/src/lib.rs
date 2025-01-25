@@ -22,18 +22,23 @@ async fn create_window(
     state: tauri::State<'_, Mutex<AppState>>,
     name: String,
 ) -> Result<(), String> {
+    // TODO: As we are accessing a dynamic path, functions such as im should have some path like '/im/group1' and '/im/group2'. The window_id will be the same
+    if (app.get_webview_window(&name)).is_some() {
+        app.get_webview_window(&name).unwrap().set_focus().unwrap();
+    } else {
+        let new_name = name.clone(); // Rust points the reference to the same memory address
+        let mut state = state.lock().unwrap();
+        let window_id = format!("{}", new_name);
+        let path: PathBuf = Path::new(window_names.get(&new_name).unwrap()).into();
+        let webview_url = tauri::WebviewUrl::App(path);
+        tauri::WebviewWindowBuilder::new(&app, &window_id, webview_url.clone())
+            .title("Instant Messaging")
+            .build()
+            .unwrap();
+        // At the end of the scope, it will lock the mutex again
+        state.window_id += 1;
+    }
     // This will unlock the mutex with .unwrap(), and thus accessing the state of
-    let mut state = state.lock().unwrap();
-    let window_id = format!("{}", name);
-    let path: PathBuf = Path::new(window_names.get(&name).unwrap()).into();
-    // println!("{}", window_id);
-    let webview_url = tauri::WebviewUrl::App(path);
-    tauri::WebviewWindowBuilder::new(&app, &window_id, webview_url.clone())
-        .title(&window_id)
-        .build()
-        .unwrap();
-    // At the end of the scope, it will lock the mutex again
-    state.window_id += 1;
     Ok(())
 }
 
@@ -49,6 +54,36 @@ pub fn run() {
         .plugin(tauri_plugin_websocket::init())
         .plugin(tauri_plugin_log::Builder::new().build())
         .setup(|app| {
+            #[cfg(desktop)]
+            {
+                use tauri_plugin_global_shortcut::{
+                    Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState,
+                };
+
+                let ctrl_n_shortcut = Shortcut::new(Some(Modifiers::CONTROL), Code::KeyN);
+                app.handle().plugin(
+                    tauri_plugin_global_shortcut::Builder::new()
+                        .with_handler(move |app, shortcut, event| {
+                            println!("{:?}", shortcut);
+                            if shortcut == &ctrl_n_shortcut {
+                                match event.state() {
+                                    ShortcutState::Pressed => {
+                                        println!("Ctrl-N Pressed!");
+                                    }
+                                    ShortcutState::Released => {
+                                        app.get_webview_window("main")
+                                            .unwrap()
+                                            .set_focus()
+                                            .unwrap();
+                                    }
+                                }
+                            }
+                        })
+                        .build(),
+                )?;
+
+                app.global_shortcut().register(ctrl_n_shortcut)?;
+            }
             app.manage(Mutex::new(AppState::default()));
             #[cfg(debug_assertions)]
             app.get_webview_window("main").unwrap().open_devtools();
