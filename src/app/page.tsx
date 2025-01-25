@@ -47,6 +47,7 @@ export default function Home() {
     };
 
     const handleAction = (selectedValue: string) => {
+        invoke("create_window", { name: selectedValue });
         console.log(`You selected: ${selectedValue}`);
     };
 
@@ -58,18 +59,9 @@ export default function Home() {
                     inputWidth="300px" // Set input width
                     groups={[
                         {
-                            label: "Suggestions",
+                            label: "Functions",
                             items: [
-                                { value: "next.js", label: "Next.js" },
-                                { value: "sveltekit", label: "SvelteKit" },
-                            ],
-                        },
-                        {
-                            label: "Popular Tools",
-                            items: [
-                                { value: "nuxt.js", label: "Nuxt.js" },
-                                { value: "remix", label: "Remix" },
-                                { value: "astro", label: "Astro" },
+                                { value: "im", label: "Instant Messaging: im" },
                             ],
                         },
                     ]}

@@ -1,16 +1,33 @@
+use lazy_static::lazy_static;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tauri::Manager;
+
+lazy_static! {
+    static ref window_names: HashMap<String, String> = {
+        let mut m = HashMap::new();
+        m.insert("im".to_string(), "http://localhost:3000/im".to_string());
+        m.insert(
+            "other".to_string(),
+            "http://localhost:3000/other".to_string(),
+        );
+        m
+    };
+}
 
 #[tauri::command]
 async fn create_window(
     app: tauri::AppHandle,
     state: tauri::State<'_, Mutex<AppState>>,
+    name: String,
 ) -> Result<(), String> {
     // This will unlock the mutex with .unwrap(), and thus accessing the state of
     let mut state = state.lock().unwrap();
-    let window_id = format!("window_{}", state.window_id);
-    println!("{}", window_id);
-    let webview_url = tauri::WebviewUrl::App("index.html".into());
+    let window_id = format!("{}", name);
+    let path: PathBuf = Path::new(window_names.get(&name).unwrap()).into();
+    // println!("{}", window_id);
+    let webview_url = tauri::WebviewUrl::App(path);
     tauri::WebviewWindowBuilder::new(&app, &window_id, webview_url.clone())
         .title(&window_id)
         .build()
