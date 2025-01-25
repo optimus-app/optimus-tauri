@@ -9,8 +9,8 @@ lazy_static! {
         let mut m = HashMap::new();
         m.insert("im".to_string(), "http://localhost:3000/im".to_string());
         m.insert(
-            "other".to_string(),
-            "http://localhost:3000/other".to_string(),
+            "dashboard".to_string(),
+            "http://localhost:3000/dashboard".to_string(),
         );
         m
     };
@@ -23,22 +23,26 @@ async fn create_window(
     name: String,
 ) -> Result<(), String> {
     // TODO: As we are accessing a dynamic path, functions such as im should have some path like '/im/group1' and '/im/group2'. The window_id will be the same
+    // For some difficult task that is logic based, we can use binding and write it in Python or C++, compile the binary and use it in Rust
+    println!("Creating window: {}", name);
     if (app.get_webview_window(&name)).is_some() {
         app.get_webview_window(&name).unwrap().set_focus().unwrap();
     } else {
         let new_name = name.clone(); // Rust points the reference to the same memory address
         let mut state = state.lock().unwrap();
         let window_id = format!("{}", new_name);
+        println!("New window id: {}", window_id);
         let path: PathBuf = Path::new(window_names.get(&new_name).unwrap()).into();
         let webview_url = tauri::WebviewUrl::App(path);
         tauri::WebviewWindowBuilder::new(&app, &window_id, webview_url.clone())
-            .title("Instant Messaging")
+            .title(&name)
             .build()
             .unwrap();
         // At the end of the scope, it will lock the mutex again
         state.window_id += 1;
     }
     // This will unlock the mutex with .unwrap(), and thus accessing the state of
+    println!("Ended");
     Ok(())
 }
 

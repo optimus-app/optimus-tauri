@@ -42,8 +42,8 @@ export default function Home() {
     };
 
     const handleAction = (selectedValue: string) => {
+        console.log("parsing {}", selectedValue);
         invoke("create_window", { name: selectedValue });
-        console.log(`You selected: ${selectedValue}`);
     };
 
     useEffect(() => {
@@ -51,8 +51,8 @@ export default function Home() {
             const unlisten = await getCurrentWindow().onFocusChanged(
                 ({ payload: focused }) => {
                     console.log("Focus changed, window is focused? " + focused);
-                    setIsFocused(focused); // Update the focus state
-                    setOpenCommandLine(focused); // Open CommandLineInput when focused
+                    setIsFocused(focused);
+                    setOpenCommandLine(focused);
                 }
             );
 
@@ -74,6 +74,7 @@ export default function Home() {
                             label: "Functions",
                             items: [
                                 { value: "im", label: "Instant Messaging" },
+                                { value: "dashboard", label: "Dashboard" },
                             ],
                         },
                     ]}
