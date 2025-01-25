@@ -1,20 +1,17 @@
 "use client";
 import { useState, useCallback, useEffect } from "react";
-import { useTheme } from "next-themes";
-import WebSocket from "@tauri-apps/plugin-websocket";
 import { Button } from "@/components/ui/button";
-import Link from "next/link";
-import { fetch } from "@tauri-apps/plugin-http";
-import { info } from "@tauri-apps/plugin-log";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Icons } from "@/components/icons";
+import { CommandLineInput } from "./components/command-line";
 import WebSocketManager from "./utils/WebSocketManager";
 import HTTPRequestManager, { Methods } from "./utils/HTTPRequestManager";
+import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 export default function Home() {
-    const [message, setMessage] = useState("Hello");
+    const [message, setMessage] = useState("Click to spawn window");
     const [connected, setConnected] = useState("Click to connect");
+    const [isFocused, setIsFocused] = useState(false);
+    const [openCommandLine, setOpenCommandLine] = useState(false);
 
     const wsManager = WebSocketManager.getInstance();
     const httpManager = HTTPRequestManager.getInstance();
@@ -32,6 +29,10 @@ export default function Home() {
         setConnected("Connected!");
     }, [wsManager]);
 
+    const createWindow = async () => {
+        invoke("create_window");
+    };
+
     const fetchData = async () => {
         const data = await httpManager
             .handleRequest("chat/chatRoom/user1", Methods.GET)
@@ -40,10 +41,47 @@ export default function Home() {
             });
     };
 
+    const handleAction = (selectedValue: string) => {
+        console.log("parsing {}", selectedValue);
+        invoke("create_window", { name: selectedValue });
+    };
+
+    useEffect(() => {
+        const setupFocusListener = async () => {
+            const unlisten = await getCurrentWindow().onFocusChanged(
+                ({ payload: focused }) => {
+                    console.log("Focus changed, window is focused? " + focused);
+                    setIsFocused(focused);
+                    setOpenCommandLine(focused);
+                }
+            );
+
+            return () => {
+                unlisten(); // Cleanup on component unmount
+            };
+        };
+        setupFocusListener();
+    }, []);
+
     return (
         <>
-            <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-                <Button onClick={fetchData}>{message}</Button>
+            <div className="grid items-center justify-items-center min-h-screen p-8 pb-20 sm:p-20 font-[family-name:var(--font-geist-sans)]">
+                <CommandLineInput
+                    onAction={handleAction}
+                    inputWidth="300px" // Set input width
+                    groups={[
+                        {
+                            label: "Functions",
+                            items: [
+                                { value: "im", label: "Instant Messaging" },
+                                { value: "dashboard", label: "Dashboard" },
+                            ],
+                        },
+                    ]}
+                    open={openCommandLine} // Bind visibility to window focus
+                    onOpenChange={setOpenCommandLine} // Allow external control of visibility
+                />
+                <Button onClick={createWindow}>{message}</Button>
                 <Button onClick={wsInit}>{connected}</Button>
             </div>
         </>
