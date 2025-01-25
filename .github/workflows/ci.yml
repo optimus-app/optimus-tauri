@@ -18,7 +18,7 @@ jobs:
             - name: Lint
               run: npm run lint
     test:
-        name: WebDriverIO Test Runner
+        name: Testing
         runs-on: ubuntu-22.04
         steps:
             - uses: actions/checkout@v4
