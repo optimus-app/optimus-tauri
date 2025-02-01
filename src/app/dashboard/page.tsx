@@ -1,9 +1,13 @@
 "use client";
 
 import React from "react";
-import ReactApexChart from "react-apexcharts";
 import { ApexOptions } from "apexcharts";
 import { useState, useEffect } from "react";
+import dynamic from "next/dynamic";
+
+const ReactApexChart = dynamic(() => import("react-apexcharts"), {
+    ssr: false,
+});
 
 interface ChartState {
     options: ApexOptions;
