@@ -38,6 +38,7 @@ async fn create_window(
             .title(&name)
             .build()
             .unwrap();
+        app.get_webview_window(&name).unwrap().open_devtools();
         // At the end of the scope, it will lock the mutex again
         state.window_id += 1;
     }

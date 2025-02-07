@@ -3,6 +3,8 @@ import WebSocket from "@tauri-apps/plugin-websocket";
 type MessageHandler = (message: string) => void;
 
 class WebSocketManager {
+    // This class uses Tauri's WebSocket and manually create a STOMP protocol system
+    // to subscribe to the messages of different channels
     private static instance: WebSocketManager | null = null; // Singleton instance
     private ws: any = null; //
     private subscriptions: Map<string, MessageHandler> = new Map(); // Subscription map

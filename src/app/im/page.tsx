@@ -1,6 +1,6 @@
 "use client";
 
-import * as React from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { Check, Plus, Send } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -35,6 +35,9 @@ import {
     TooltipProvider,
     TooltipTrigger,
 } from "@/components/ui/tooltip";
+import WebSocketManager from "../utils/WebSocketManager";
+import HTTPRequestManager, { Methods } from "../utils/HTTPRequestManager";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 const users = [
     {
@@ -66,35 +69,89 @@ const users = [
 
 type User = (typeof users)[number];
 
-export default function CardsChat() {
-    const [open, setOpen] = React.useState(false);
-    const [selectedUsers, setSelectedUsers] = React.useState<User[]>([]);
+interface Message {
+    role: string;
+    content: string;
+}
 
-    const [messages, setMessages] = React.useState([
-        {
-            role: "agent",
-            content: "Hi, how can I help you today?",
-        },
-        {
-            role: "user",
-            content: "Hey, I'm having trouble with my account.",
-        },
-        {
-            role: "agent",
-            content: "What seems to be the problem?",
-        },
-        {
-            role: "user",
-            content: "I can't log in.",
-        },
-    ]);
-    const [input, setInput] = React.useState("");
+export default function CardsChat() {
+    const wsManager = useMemo(() => WebSocketManager.getInstance(), []);
+    const httpManager = useMemo(() => HTTPRequestManager.getInstance(), []);
+
+    const [open, setOpen] = useState(false);
+    const [selectedUsers, setSelectedUsers] = useState<User[]>([]);
+    const [messages, setMessages] = useState<Message[]>([]);
+    const [input, setInput] = useState("");
     const inputLength = input.trim().length;
+    const lastMessageRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        const wsInit = async () => {
+            try {
+                wsManager.addSubscriptionPath(
+                    "/subscribe/chat/messages/user1",
+                    (msg: any) => {
+                        setMessages((prev) => [
+                            ...prev,
+                            {
+                                role: "agent",
+                                content: msg.content,
+                            },
+                        ]);
+                    }
+                );
+                await wsManager.start();
+            } catch (error) {
+                console.error("WebSocket subscription failed", error);
+            }
+        };
+        wsInit();
+        return () => {
+            wsManager.disconnect();
+        };
+    }, [wsManager]);
+
+    useEffect(() => {
+        const fetchInitialMessage = async () => {
+            try {
+                await httpManager
+                    .handleRequest("chat/messages/1", Methods.GET)
+                    .then((r) => {
+                        console.log("Sent!", r);
+                        r.forEach((item: any) => {
+                            setMessages((prev) => [
+                                ...prev,
+                                {
+                                    role:
+                                        item.role === "user1"
+                                            ? "user"
+                                            : "agent",
+                                    content: item.content,
+                                },
+                            ]);
+                        });
+                    });
+            } catch (error) {
+                console.error("Did not send it out!", error);
+            }
+        };
+
+        fetchInitialMessage();
+    }, [httpManager]);
+
+    useEffect(() => {
+        if (lastMessageRef.current) {
+            lastMessageRef.current.scrollIntoView({
+                behavior: "smooth",
+                block: "end",
+            });
+        }
+    }, [messages]);
 
     return (
-        <div className="font-[family-name:var(--font-geist-sans)]">
-            <Card>
-                <CardHeader className="flex flex-row items-center">
+        <div className="font-[family-name:var(--font-geist-sans)] h-screen flex flex-col">
+            <Card className="flex flex-col h-full">
+                <CardHeader className="flex flex-row items-center shrink-0">
                     <div className="flex items-center space-x-4">
                         <Avatar>
                             <AvatarImage src="/avatars/01.png" alt="Image" />
@@ -128,30 +185,33 @@ export default function CardsChat() {
                         </Tooltip>
                     </TooltipProvider>
                 </CardHeader>
-                <CardContent>
-                    <div className="space-y-4">
-                        {messages.map((message, index) => (
-                            <div
-                                key={index}
-                                className={cn(
-                                    "flex w-max max-w-[75%] flex-col gap-2 rounded-lg px-3 py-2 text-sm",
-                                    message.role === "user"
-                                        ? "ml-auto bg-primary text-primary-foreground"
-                                        : "bg-muted"
-                                )}
-                            >
-                                {message.content}
-                            </div>
-                        ))}
-                    </div>
+                <CardContent className="flex-1 min-h-0">
+                    <ScrollArea className="h-full">
+                        <div className="space-y-4 p-4">
+                            {messages.map((message, index) => (
+                                <div
+                                    key={index}
+                                    className={cn(
+                                        "flex w-max max-w-[75%] flex-col gap-2 rounded-lg px-3 py-2 text-sm",
+                                        message.role === "user"
+                                            ? "ml-auto bg-primary text-primary-foreground"
+                                            : "bg-muted"
+                                    )}
+                                >
+                                    {message.content}
+                                </div>
+                            ))}
+                            <div ref={lastMessageRef} />
+                        </div>
+                    </ScrollArea>
                 </CardContent>
-                <CardFooter>
+                <CardFooter className="shrink-0 border-t bg-card">
                     <form
                         onSubmit={(event) => {
                             event.preventDefault();
                             if (inputLength === 0) return;
-                            setMessages([
-                                ...messages,
+                            setMessages((prev) => [
+                                ...prev,
                                 {
                                     role: "user",
                                     content: input,
@@ -208,15 +268,10 @@ export default function CardsChat() {
                                                     )
                                                 );
                                             }
-
-                                            return setSelectedUsers(
-                                                [...users].filter((u) =>
-                                                    [
-                                                        ...selectedUsers,
-                                                        user,
-                                                    ].includes(u)
-                                                )
-                                            );
+                                            return setSelectedUsers([
+                                                ...selectedUsers,
+                                                user,
+                                            ]);
                                         }}
                                     >
                                         <Avatar>
@@ -266,9 +321,7 @@ export default function CardsChat() {
                         )}
                         <Button
                             disabled={selectedUsers.length < 2}
-                            onClick={() => {
-                                setOpen(false);
-                            }}
+                            onClick={() => setOpen(false)}
                         >
                             Continue
                         </Button>

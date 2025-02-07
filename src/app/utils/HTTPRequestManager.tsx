@@ -18,10 +18,12 @@ class HTTPRequestManager {
 
     async handleRequest(path: string, request_method: Methods): Promise<any> {
         const final_path = this.url + path;
+        console.log("Final path", final_path);
         const response = await fetch(final_path, {
             method: request_method,
         });
         const data = await response.text();
+        console.log(JSON.parse(data));
         return JSON.parse(data);
     }
 }

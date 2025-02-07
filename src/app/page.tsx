@@ -41,6 +41,22 @@ export default function Home() {
             });
     };
 
+    useEffect(() => {
+        const fetchInitialMessage = async () => {
+            try {
+                const response = await httpManager
+                    .handleRequest("chat/chatRoom/user1", Methods.GET)
+                    .then((r) => {
+                        console.log("Sent!");
+                    });
+            } catch (error) {
+                console.log("Did not send it out!");
+            }
+        };
+
+        fetchInitialMessage();
+    }, [httpManager]);
+
     const handleAction = (selectedValue: string) => {
         console.log("parsing {}", selectedValue);
         invoke("create_window", { name: selectedValue });
