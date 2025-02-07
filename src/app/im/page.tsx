@@ -49,11 +49,21 @@ import {
     SidebarProvider,
     SidebarTrigger,
 } from "@/components/ui/sidebar";
+import { Skeleton } from "@/components/ui/skeleton";
 import { AppSidebar } from "@/components/app-sidebar";
 import WebSocketManager from "../utils/WebSocketManager";
 import HTTPRequestManager, { Methods } from "../utils/HTTPRequestManager";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useTheme } from "next-themes";
+
+const ChatSkeleton = () => (
+    <div className="space-y-4 p-4">
+        <Skeleton className="h-12 w-[200px] ml-0" />
+        <Skeleton className="h-12 w-[300px] ml-auto" />
+        <Skeleton className="h-12 w-[250px] ml-0" />
+        <Skeleton className="h-12 w-[200px] ml-auto" />
+    </div>
+);
 
 const users = [
     {
@@ -112,6 +122,8 @@ async function sendMessageToServer(
     }
 }
 
+const userName = "user4";
+
 export default function CardsChat() {
     const { setTheme } = useTheme();
     setTheme("dark");
@@ -123,19 +135,71 @@ export default function CardsChat() {
     const [messages, setMessages] = useState<Message[]>([]);
     const [input, setInput] = useState("");
     const inputLength = input.trim().length;
+    const [chatData, setChatData] = useState<any>({ navMain: [] });
+    const [isLoading, setIsLoading] = useState(true);
+    const [activeChatId, setActiveChatId] = useState<number | null>(null);
+    const [activeChatName, setActiveChatName] = useState<string>("");
 
     const lastMessageRef = useRef<HTMLDivElement>(null);
+
+    const loadChatMessages = async (chatId: number) => {
+        setIsLoading(true);
+        setMessages([]); // Clear existing messages
+
+        try {
+            const response = await httpManager.handleRequest(
+                `chat/messages/${chatId}`,
+                Methods.GET,
+                null
+            ); // Note: changed from chatRoom to messages
+
+            // Update chat name
+            const chatRoom = chatData.navMain[0].items.find(
+                (item: any) => item.id === chatId
+            );
+            setActiveChatName(chatRoom?.title || "Chat");
+
+            // Check if response is an array
+            if (Array.isArray(response)) {
+                response.forEach((item: any) => {
+                    setMessages((prev) => [
+                        ...prev,
+                        {
+                            role: item.sender === userName ? "user" : "agent",
+                            content: item.content,
+                        },
+                    ]);
+                });
+            } else {
+                console.error("Unexpected response format:", response);
+                throw new Error("Invalid response format");
+            }
+        } catch (error) {
+            console.error("Failed to load chat messages:", error);
+            // Keep the loading state if there's an error
+            // You might want to show an error message to the user
+            setMessages([
+                {
+                    role: "system",
+                    content: "Failed to load messages. Please try again later.",
+                },
+            ]);
+        } finally {
+            setIsLoading(false);
+        }
+    };
 
     useEffect(() => {
         const wsInit = async () => {
             try {
                 wsManager.addSubscriptionPath(
-                    "/subscribe/chat/messages/user1",
+                    `/subscribe/chat/messages/${userName}`,
                     (msg: any) => {
                         setMessages((prev) => [
                             ...prev,
                             {
-                                role: msg.sender === "user1" ? "user" : "agent",
+                                role:
+                                    msg.sender === userName ? "user" : "agent",
                                 content: msg.content,
                             },
                         ]);
@@ -152,33 +216,33 @@ export default function CardsChat() {
         };
     }, [wsManager]);
 
-    useEffect(() => {
-        const fetchInitialMessage = async () => {
-            try {
-                await httpManager
-                    .handleRequest("chat/messages/1", Methods.GET, null)
-                    .then((r) => {
-                        console.log("Sent!", r);
-                        r.forEach((item: any) => {
-                            setMessages((prev) => [
-                                ...prev,
-                                {
-                                    role:
-                                        item.sender === "user1"
-                                            ? "user"
-                                            : "agent",
-                                    content: item.content,
-                                },
-                            ]);
-                        });
-                    });
-            } catch (error) {
-                console.error("Did not send it out!", error);
-            }
-        };
+    // useEffect(() => {
+    //     const fetchInitialMessage = async () => {
+    //         try {
+    //             await httpManager
+    //                 .handleRequest("chat/messages/1", Methods.GET, null)
+    //                 .then((r) => {
+    //                     console.log("Sent!", r);
+    //                     r.forEach((item: any) => {
+    //                         setMessages((prev) => [
+    //                             ...prev,
+    //                             {
+    //                                 role:
+    //                                     item.sender === "user1"
+    //                                         ? "user"
+    //                                         : "agent",
+    //                                 content: item.content,
+    //                             },
+    //                         ]);
+    //                     });
+    //                 });
+    //         } catch (error) {
+    //             console.error("Did not send it out!", error);
+    //         }
+    //     };
 
-        fetchInitialMessage();
-    }, [httpManager]);
+    //     fetchInitialMessage();
+    // }, [httpManager]);
 
     useEffect(() => {
         if (lastMessageRef.current) {
@@ -189,6 +253,41 @@ export default function CardsChat() {
         }
     }, [messages]);
 
+    useEffect(() => {
+        const getChatRoom = async () => {
+            try {
+                const response = await httpManager
+                    .handleRequest(
+                        `chat/chatRoom/${userName}`,
+                        Methods.GET,
+                        null
+                    )
+                    .then((r) => {
+                        console.log("Responses: ", r);
+                        const formattedData = {
+                            navMain: [
+                                {
+                                    title: "Messages",
+                                    url: "#",
+                                    id: 0,
+                                    items: r.map((room: any) => ({
+                                        title: room.roomTitle,
+                                        url: "#",
+                                        id: room.roomId,
+                                        isActive: false,
+                                    })),
+                                },
+                            ],
+                        };
+                        setChatData(formattedData);
+                    });
+            } catch (error) {
+                console.log("Error!", error);
+            }
+        };
+        getChatRoom();
+    }, [httpManager]);
+
     return (
         <SidebarProvider
             style={
@@ -197,7 +296,16 @@ export default function CardsChat() {
                 } as React.CSSProperties
             }
         >
-            <AppSidebar />
+            <AppSidebar
+                data={chatData}
+                username={userName}
+                onChatSelect={(chatId) => {
+                    console.log("selected chat", chatId);
+                    setActiveChatId(Number(chatId));
+                    loadChatMessages(Number(chatId));
+                }}
+                activeRoomId={activeChatId || undefined}
+            />
             <SidebarInset>
                 <header className="flex h-16 shrink-0 items-center gap-2 px-4">
                     <SidebarTrigger className="-ml-1" />
@@ -211,109 +319,127 @@ export default function CardsChat() {
                             </BreadcrumbItem>
                             <BreadcrumbSeparator className="hidden md:block" />
                             <BreadcrumbItem>
-                                <BreadcrumbPage>Chat</BreadcrumbPage>
+                                <BreadcrumbPage>
+                                    {activeChatName || "Select a chat"}
+                                </BreadcrumbPage>
                             </BreadcrumbItem>
                         </BreadcrumbList>
                     </Breadcrumb>
                 </header>
                 <div className="flex flex-1 flex-col p-4 pt-0 h-[calc(100vh-4rem)]">
-                    <Card className="flex flex-col h-full">
-                        <CardHeader className="flex flex-row items-center shrink-0">
-                            <div className="flex items-center space-x-4">
-                                <Avatar>
-                                    <AvatarImage
-                                        src="/avatars/01.png"
-                                        alt="Image"
-                                    />
-                                    <AvatarFallback>OM</AvatarFallback>
-                                </Avatar>
-                                <div>
-                                    <p className="text-sm font-medium leading-none">
-                                        Sofia Davis
-                                    </p>
-                                    <p className="text-sm text-muted-foreground">
-                                        m@example.com
-                                    </p>
+                    {!activeChatId ? (
+                        <div className="flex h-full items-center justify-center text-muted-foreground">
+                            Select a chat to start messaging
+                        </div>
+                    ) : (
+                        <Card className="flex flex-col h-full">
+                            <CardHeader className="flex flex-row items-center shrink-0">
+                                <div className="flex items-center space-x-4">
+                                    <Avatar>
+                                        <AvatarImage
+                                            src="/avatars/01.png"
+                                            alt="Image"
+                                        />
+                                        <AvatarFallback>OM</AvatarFallback>
+                                    </Avatar>
+                                    <div>
+                                        <p className="text-sm font-medium leading-none">
+                                            Sofia Davis
+                                        </p>
+                                        <p className="text-sm text-muted-foreground">
+                                            m@example.com
+                                        </p>
+                                    </div>
                                 </div>
-                            </div>
-                            <TooltipProvider delayDuration={0}>
-                                <Tooltip>
-                                    <TooltipTrigger asChild>
-                                        <Button
-                                            size="icon"
-                                            variant="outline"
-                                            className="ml-auto rounded-full"
-                                            onClick={() => setOpen(true)}
-                                        >
-                                            <Plus />
-                                            <span className="sr-only">
-                                                New message
-                                            </span>
-                                        </Button>
-                                    </TooltipTrigger>
-                                    <TooltipContent sideOffset={10}>
-                                        New message
-                                    </TooltipContent>
-                                </Tooltip>
-                            </TooltipProvider>
-                        </CardHeader>
-                        <CardContent className="flex-1 min-h-0 p-0">
-                            <ScrollArea className="h-full">
-                                <div className="space-y-4 p-4">
-                                    {messages.map((message, index) => (
-                                        <div
-                                            key={index}
-                                            className={cn(
-                                                "flex w-max max-w-[75%] flex-col gap-2 rounded-lg px-3 py-2 text-sm",
-                                                message.role === "user"
-                                                    ? "ml-auto bg-primary text-primary-foreground"
-                                                    : "bg-muted"
-                                            )}
-                                        >
-                                            {message.content}
+                                <TooltipProvider delayDuration={0}>
+                                    <Tooltip>
+                                        <TooltipTrigger asChild>
+                                            <Button
+                                                size="icon"
+                                                variant="outline"
+                                                className="ml-auto rounded-full"
+                                                onClick={() => setOpen(true)}
+                                            >
+                                                <Plus />
+                                                <span className="sr-only">
+                                                    New message
+                                                </span>
+                                            </Button>
+                                        </TooltipTrigger>
+                                        <TooltipContent sideOffset={10}>
+                                            New message
+                                        </TooltipContent>
+                                    </Tooltip>
+                                </TooltipProvider>
+                            </CardHeader>
+                            <CardContent className="flex-1 min-h-0 p-0">
+                                <ScrollArea className="h-full">
+                                    {isLoading ? (
+                                        <ChatSkeleton />
+                                    ) : messages.length === 0 ? (
+                                        <div className="flex h-full items-center justify-center text-muted-foreground">
+                                            No messages found
                                         </div>
-                                    ))}
-                                    <div ref={lastMessageRef} />
-                                </div>
-                            </ScrollArea>
-                        </CardContent>
-                        <CardFooter className="shrink-0">
-                            <form
-                                onSubmit={(event) => {
-                                    event.preventDefault();
-                                    if (inputLength === 0) return;
-                                    setInput("");
-                                    sendMessageToServer(
-                                        1,
-                                        input,
-                                        "user1",
-                                        httpManager
-                                    );
-                                    console.log("Message sent!");
-                                }}
-                                className="flex w-full items-center space-x-2"
-                            >
-                                <Input
-                                    id="message"
-                                    placeholder="Type your message..."
-                                    className="flex-1"
-                                    autoComplete="off"
-                                    value={input}
-                                    onChange={(event) =>
-                                        setInput(event.target.value)
-                                    }
-                                />
-                                <Button
-                                    type="submit"
-                                    size="icon"
-                                    disabled={inputLength === 0}
+                                    ) : (
+                                        <div className="space-y-4 p-4">
+                                            {messages.map((message, index) => (
+                                                <div
+                                                    key={index}
+                                                    className={cn(
+                                                        "flex w-max max-w-[75%] flex-col gap-2 rounded-lg px-3 py-2 text-sm",
+                                                        message.role === "user"
+                                                            ? "ml-auto bg-primary text-primary-foreground"
+                                                            : message.role ===
+                                                              "system"
+                                                            ? "mx-auto bg-destructive text-destructive-foreground"
+                                                            : "bg-muted"
+                                                    )}
+                                                >
+                                                    {message.content}
+                                                </div>
+                                            ))}
+                                            <div ref={lastMessageRef} />
+                                        </div>
+                                    )}
+                                </ScrollArea>
+                            </CardContent>
+                            <CardFooter className="shrink-0">
+                                <form
+                                    onSubmit={(event) => {
+                                        event.preventDefault();
+                                        if (inputLength === 0) return;
+                                        setInput("");
+                                        sendMessageToServer(
+                                            Number(activeChatId),
+                                            input,
+                                            userName,
+                                            httpManager
+                                        );
+                                    }}
+                                    className="flex w-full items-center space-x-2"
                                 >
-                                    <Send />
-                                    <span className="sr-only">Send</span>
-                                </Button>
-                            </form>
-                        </CardFooter>
-                    </Card>
+                                    <Input
+                                        id="message"
+                                        placeholder="Type your message..."
+                                        className="flex-1"
+                                        autoComplete="off"
+                                        value={input}
+                                        onChange={(event) =>
+                                            setInput(event.target.value)
+                                        }
+                                    />
+                                    <Button
+                                        type="submit"
+                                        size="icon"
+                                        disabled={inputLength === 0}
+                                    >
+                                        <Send />
+                                        <span className="sr-only">Send</span>
+                                    </Button>
+                                </form>
+                            </CardFooter>
+                        </Card>
+                    )}
                 </div>
             </SidebarInset>
             <Dialog open={open} onOpenChange={setOpen}>

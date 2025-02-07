@@ -33,7 +33,6 @@ class HTTPRequestManager {
                 : {},
         });
         const data = await response.text();
-        console.log(JSON.parse(data));
         return JSON.parse(data);
     }
 }
