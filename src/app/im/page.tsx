@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, useRef } from "react";
-import { Check, Plus, Send } from "lucide-react";
+import { Check, Plus, Send, GalleryVerticalEnd } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -35,9 +35,25 @@ import {
     TooltipProvider,
     TooltipTrigger,
 } from "@/components/ui/tooltip";
+import {
+    Breadcrumb,
+    BreadcrumbItem,
+    BreadcrumbLink,
+    BreadcrumbList,
+    BreadcrumbPage,
+    BreadcrumbSeparator,
+} from "@/components/ui/breadcrumb";
+import { Separator } from "@/components/ui/separator";
+import {
+    SidebarInset,
+    SidebarProvider,
+    SidebarTrigger,
+} from "@/components/ui/sidebar";
+import { AppSidebar } from "@/components/app-sidebar";
 import WebSocketManager from "../utils/WebSocketManager";
 import HTTPRequestManager, { Methods } from "../utils/HTTPRequestManager";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { useTheme } from "next-themes";
 
 const users = [
     {
@@ -74,7 +90,31 @@ interface Message {
     content: string;
 }
 
+async function sendMessageToServer(
+    chatRoom: number,
+    content: string,
+    user: string,
+    httpManager: HTTPRequestManager
+) {
+    let payload = {
+        content: content,
+        sender: user,
+        roomId: chatRoom,
+    };
+    try {
+        const response = await httpManager
+            .handleRequest("chat/message", Methods.POST, payload)
+            .then((r) => {
+                console.log("Sent!", r);
+            });
+    } catch (error) {
+        console.error("Lolololololololol!", error);
+    }
+}
+
 export default function CardsChat() {
+    const { setTheme } = useTheme();
+    setTheme("dark");
     const wsManager = useMemo(() => WebSocketManager.getInstance(), []);
     const httpManager = useMemo(() => HTTPRequestManager.getInstance(), []);
 
@@ -83,6 +123,7 @@ export default function CardsChat() {
     const [messages, setMessages] = useState<Message[]>([]);
     const [input, setInput] = useState("");
     const inputLength = input.trim().length;
+
     const lastMessageRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
@@ -94,7 +135,7 @@ export default function CardsChat() {
                         setMessages((prev) => [
                             ...prev,
                             {
-                                role: "agent",
+                                role: msg.sender === "user1" ? "user" : "agent",
                                 content: msg.content,
                             },
                         ]);
@@ -115,7 +156,7 @@ export default function CardsChat() {
         const fetchInitialMessage = async () => {
             try {
                 await httpManager
-                    .handleRequest("chat/messages/1", Methods.GET)
+                    .handleRequest("chat/messages/1", Methods.GET, null)
                     .then((r) => {
                         console.log("Sent!", r);
                         r.forEach((item: any) => {
@@ -123,7 +164,7 @@ export default function CardsChat() {
                                 ...prev,
                                 {
                                     role:
-                                        item.role === "user1"
+                                        item.sender === "user1"
                                             ? "user"
                                             : "agent",
                                     content: item.content,
@@ -149,97 +190,132 @@ export default function CardsChat() {
     }, [messages]);
 
     return (
-        <div className="font-[family-name:var(--font-geist-sans)] h-screen flex flex-col">
-            <Card className="flex flex-col h-full">
-                <CardHeader className="flex flex-row items-center shrink-0">
-                    <div className="flex items-center space-x-4">
-                        <Avatar>
-                            <AvatarImage src="/avatars/01.png" alt="Image" />
-                            <AvatarFallback>OM</AvatarFallback>
-                        </Avatar>
-                        <div>
-                            <p className="text-sm font-medium leading-none">
-                                Sofia Davis
-                            </p>
-                            <p className="text-sm text-muted-foreground">
-                                m@example.com
-                            </p>
-                        </div>
-                    </div>
-                    <TooltipProvider delayDuration={0}>
-                        <Tooltip>
-                            <TooltipTrigger asChild>
-                                <Button
-                                    size="icon"
-                                    variant="outline"
-                                    className="ml-auto rounded-full"
-                                    onClick={() => setOpen(true)}
-                                >
-                                    <Plus />
-                                    <span className="sr-only">New message</span>
-                                </Button>
-                            </TooltipTrigger>
-                            <TooltipContent sideOffset={10}>
-                                New message
-                            </TooltipContent>
-                        </Tooltip>
-                    </TooltipProvider>
-                </CardHeader>
-                <CardContent className="flex-1 min-h-0">
-                    <ScrollArea className="h-full">
-                        <div className="space-y-4 p-4">
-                            {messages.map((message, index) => (
-                                <div
-                                    key={index}
-                                    className={cn(
-                                        "flex w-max max-w-[75%] flex-col gap-2 rounded-lg px-3 py-2 text-sm",
-                                        message.role === "user"
-                                            ? "ml-auto bg-primary text-primary-foreground"
-                                            : "bg-muted"
-                                    )}
-                                >
-                                    {message.content}
+        <SidebarProvider
+            style={
+                {
+                    "--sidebar-width": "19rem",
+                } as React.CSSProperties
+            }
+        >
+            <AppSidebar />
+            <SidebarInset>
+                <header className="flex h-16 shrink-0 items-center gap-2 px-4">
+                    <SidebarTrigger className="-ml-1" />
+                    <Separator orientation="vertical" className="mr-2 h-4" />
+                    <Breadcrumb>
+                        <BreadcrumbList>
+                            <BreadcrumbItem className="hidden md:block">
+                                <BreadcrumbLink href="#">
+                                    Messages
+                                </BreadcrumbLink>
+                            </BreadcrumbItem>
+                            <BreadcrumbSeparator className="hidden md:block" />
+                            <BreadcrumbItem>
+                                <BreadcrumbPage>Chat</BreadcrumbPage>
+                            </BreadcrumbItem>
+                        </BreadcrumbList>
+                    </Breadcrumb>
+                </header>
+                <div className="flex flex-1 flex-col p-4 pt-0 h-[calc(100vh-4rem)]">
+                    <Card className="flex flex-col h-full">
+                        <CardHeader className="flex flex-row items-center shrink-0">
+                            <div className="flex items-center space-x-4">
+                                <Avatar>
+                                    <AvatarImage
+                                        src="/avatars/01.png"
+                                        alt="Image"
+                                    />
+                                    <AvatarFallback>OM</AvatarFallback>
+                                </Avatar>
+                                <div>
+                                    <p className="text-sm font-medium leading-none">
+                                        Sofia Davis
+                                    </p>
+                                    <p className="text-sm text-muted-foreground">
+                                        m@example.com
+                                    </p>
                                 </div>
-                            ))}
-                            <div ref={lastMessageRef} />
-                        </div>
-                    </ScrollArea>
-                </CardContent>
-                <CardFooter className="shrink-0 border-t bg-card">
-                    <form
-                        onSubmit={(event) => {
-                            event.preventDefault();
-                            if (inputLength === 0) return;
-                            setMessages((prev) => [
-                                ...prev,
-                                {
-                                    role: "user",
-                                    content: input,
-                                },
-                            ]);
-                            setInput("");
-                        }}
-                        className="flex w-full items-center space-x-2"
-                    >
-                        <Input
-                            id="message"
-                            placeholder="Type your message..."
-                            className="flex-1"
-                            autoComplete="off"
-                            value={input}
-                            onChange={(event) => setInput(event.target.value)}
-                        />
-                        <Button
-                            type="submit"
-                            size="icon"
-                            disabled={inputLength === 0}
-                        >
-                            <Send />
-                            <span className="sr-only">Send</span>
-                        </Button>
-                    </form>
-                </CardFooter>
-            </Card>
+                            </div>
+                            <TooltipProvider delayDuration={0}>
+                                <Tooltip>
+                                    <TooltipTrigger asChild>
+                                        <Button
+                                            size="icon"
+                                            variant="outline"
+                                            className="ml-auto rounded-full"
+                                            onClick={() => setOpen(true)}
+                                        >
+                                            <Plus />
+                                            <span className="sr-only">
+                                                New message
+                                            </span>
+                                        </Button>
+                                    </TooltipTrigger>
+                                    <TooltipContent sideOffset={10}>
+                                        New message
+                                    </TooltipContent>
+                                </Tooltip>
+                            </TooltipProvider>
+                        </CardHeader>
+                        <CardContent className="flex-1 min-h-0 p-0">
+                            <ScrollArea className="h-full">
+                                <div className="space-y-4 p-4">
+                                    {messages.map((message, index) => (
+                                        <div
+                                            key={index}
+                                            className={cn(
+                                                "flex w-max max-w-[75%] flex-col gap-2 rounded-lg px-3 py-2 text-sm",
+                                                message.role === "user"
+                                                    ? "ml-auto bg-primary text-primary-foreground"
+                                                    : "bg-muted"
+                                            )}
+                                        >
+                                            {message.content}
+                                        </div>
+                                    ))}
+                                    <div ref={lastMessageRef} />
+                                </div>
+                            </ScrollArea>
+                        </CardContent>
+                        <CardFooter className="shrink-0">
+                            <form
+                                onSubmit={(event) => {
+                                    event.preventDefault();
+                                    if (inputLength === 0) return;
+                                    setInput("");
+                                    sendMessageToServer(
+                                        1,
+                                        input,
+                                        "user1",
+                                        httpManager
+                                    );
+                                    console.log("Message sent!");
+                                }}
+                                className="flex w-full items-center space-x-2"
+                            >
+                                <Input
+                                    id="message"
+                                    placeholder="Type your message..."
+                                    className="flex-1"
+                                    autoComplete="off"
+                                    value={input}
+                                    onChange={(event) =>
+                                        setInput(event.target.value)
+                                    }
+                                />
+                                <Button
+                                    type="submit"
+                                    size="icon"
+                                    disabled={inputLength === 0}
+                                >
+                                    <Send />
+                                    <span className="sr-only">Send</span>
+                                </Button>
+                            </form>
+                        </CardFooter>
+                    </Card>
+                </div>
+            </SidebarInset>
             <Dialog open={open} onOpenChange={setOpen}>
                 <DialogContent className="gap-0 p-0 outline-none">
                     <DialogHeader className="px-4 pb-4 pt-5">
@@ -328,6 +404,6 @@ export default function CardsChat() {
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
-        </div>
+        </SidebarProvider>
     );
 }

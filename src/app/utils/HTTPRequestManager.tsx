@@ -16,11 +16,21 @@ class HTTPRequestManager {
         return HTTPRequestManager.instance;
     }
 
-    async handleRequest(path: string, request_method: Methods): Promise<any> {
+    async handleRequest(
+        path: string,
+        request_method: Methods,
+        payload: any | null
+    ): Promise<any> {
         const final_path = this.url + path;
         console.log("Final path", final_path);
         const response = await fetch(final_path, {
             method: request_method,
+            body: payload ? JSON.stringify(payload) : null,
+            headers: payload
+                ? {
+                      "Content-Type": "application/json",
+                  }
+                : {},
         });
         const data = await response.text();
         console.log(JSON.parse(data));

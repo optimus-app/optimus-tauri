@@ -36,6 +36,7 @@ async fn create_window(
         let webview_url = tauri::WebviewUrl::App(path);
         tauri::WebviewWindowBuilder::new(&app, &window_id, webview_url.clone())
             .title(&name)
+            .inner_size(1200.00, 800.00)
             .build()
             .unwrap();
         app.get_webview_window(&name).unwrap().open_devtools();
