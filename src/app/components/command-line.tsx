@@ -15,21 +15,6 @@ import {
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent } from "@/components/ui/popover";
 
-/**
- * Modified so that:
- * 1) Each item shows its label and, on the right side (small gray text), the item's value.
- * 2) Tab auto-fills the *value* into the input (instead of the label).
- * 3) Searching is possible by both the label and the value.
- *
- * You can supply any groups array with shape:
- * [
- *   {
- *     label?: string;
- *     items: { value: string; label: string }[];
- *   }
- * ]
- * and optionally control open state via `open` and `onOpenChange`.
- */
 export function CommandLineInput({
     onAction,
     inputWidth = "200px",
@@ -37,7 +22,7 @@ export function CommandLineInput({
     open,
     onOpenChange,
 }: {
-    onAction?: (currentValue: string, currentLabel: string) => void;
+    onAction?: (command: string, args: string[], fullInput: string) => void;
     inputWidth?: string;
     groups?: { label?: string; items: { value: string; label: string }[] }[];
     open?: boolean;
@@ -47,14 +32,21 @@ export function CommandLineInput({
     const [value, setValue] = React.useState("");
     const inputRef = React.useRef<HTMLInputElement>(null);
 
-    // Automatically focus the input field when the dropdown is opened
+    const parseCommandLine = (input: string) => {
+        const parts = input.trim().match(/("[^"]+"|[^\s"]+)/g) || [];
+        return parts.map((part) => part.replace(/^"(.*)"$/, "$1"));
+    };
+
+    const getCommandPart = (input: string) => {
+        return input.split(/\s+/)[0] || "";
+    };
+
     React.useEffect(() => {
         if (open) {
             inputRef.current?.focus();
         }
     }, [open]);
 
-    // Handle `Command + K` or `Ctrl + K` shortcut
     React.useEffect(() => {
         const handleShortcut = (e: KeyboardEvent) => {
             const isMac = navigator.platform.toUpperCase().includes("MAC");
@@ -74,49 +66,65 @@ export function CommandLineInput({
         };
     }, [onOpenChange]);
 
-    // Handle keydown events for autocomplete (Tab, Enter, Escape)
     const handleKeyDown = (e: React.KeyboardEvent) => {
-        const highlightedItem = document.querySelector(
-            '[cmdk-item][aria-selected="true"]'
-        ) as HTMLElement | null;
+        try {
+            const highlightedItem = document.querySelector(
+                '[cmdk-item][aria-selected="true"]'
+            ) as HTMLElement | null;
 
-        if (e.key === "Enter" && highlightedItem) {
-            // Select the highlighted item with Enter
-            const currentValue =
-                highlightedItem.getAttribute("data-item-value");
-            const currentLabel =
-                highlightedItem.getAttribute("data-item-label");
-            if (currentValue && currentLabel) {
-                onAction?.(currentValue, currentLabel);
-                setValue(currentValue); // store the value in state
-                setSearch("");
-                onOpenChange?.(false);
-                inputRef.current?.blur();
+            if (e.key === "Enter") {
+                e.preventDefault();
+                if (search.trim()) {
+                    const parts = parseCommandLine(search);
+                    const command = parts[0];
+                    const args = parts.slice(1);
+                    onAction?.(command, args, search);
+                    setSearch("");
+                    onOpenChange?.(false);
+                    inputRef.current?.blur();
+                }
+            } else if (e.key === "Tab" && highlightedItem) {
+                e.preventDefault();
+                const currentValue =
+                    highlightedItem.getAttribute("data-item-value");
+                if (currentValue) {
+                    const currentArgs = search.slice(
+                        getCommandPart(search).length
+                    );
+                    setSearch(currentValue + currentArgs);
+                }
+            } else if (e.key === "Escape") {
+                setTimeout(() => {
+                    onOpenChange?.(false);
+                    inputRef.current?.blur();
+                }, 0);
             }
-        } else if (e.key === "Tab" && highlightedItem) {
-            // Autofill the *value* into the input with Tab
-            e.preventDefault();
-            const currentValue =
-                highlightedItem.getAttribute("data-item-value");
-            if (currentValue) {
-                setSearch(currentValue);
-            }
-        } else if (e.key === "Escape") {
-            onOpenChange?.(false);
-            inputRef.current?.blur();
+        } catch (error) {
+            // Optionally log the error if needed, but don't rethrow it.
+            console.error("KeyDown handler error:", error);
         }
     };
 
     return (
         <div className="flex items-center">
             <Popover open={open} onOpenChange={onOpenChange}>
-                <Command>
+                <Command
+                    filter={(value, search) => {
+                        const commandPart = getCommandPart(
+                            search.toLowerCase()
+                        );
+                        if (!commandPart) return 1;
+                        const itemValue = value.toLowerCase();
+                        if (itemValue.includes(commandPart)) return 1;
+                        return 0;
+                    }}
+                >
                     <PopoverPrimitive.Anchor asChild>
                         <CommandPrimitive.Input
                             asChild
                             value={search}
                             onValueChange={setSearch}
-                            placeholder="Select framework..."
+                            placeholder="Type a command..."
                             onKeyDown={handleKeyDown}
                             onFocus={() => onOpenChange?.(true)}
                             ref={inputRef}
@@ -131,7 +139,7 @@ export function CommandLineInput({
                         onOpenAutoFocus={(e) => e.preventDefault()}
                     >
                         <CommandList>
-                            <CommandEmpty>No items found.</CommandEmpty>
+                            <CommandEmpty>No commands found.</CommandEmpty>
 
                             {groups.map((group, idx) => (
                                 <CommandGroup key={idx}>
@@ -141,35 +149,45 @@ export function CommandLineInput({
                                         </div>
                                     )}
                                     {group.items.map((item) => {
-                                        // Combine item.value and item.label
-                                        // so that users can search by either
-                                        const combinedSearchValue = `${item.value} ${item.label}`;
-                                        return (
+                                        const searchCommand = getCommandPart(
+                                            search.toLowerCase()
+                                        );
+                                        const combinedSearchValue =
+                                            `${item.value} ${item.label}`.toLowerCase();
+
+                                        const shouldShow =
+                                            !searchCommand ||
+                                            combinedSearchValue.includes(
+                                                searchCommand
+                                            );
+
+                                        return shouldShow ? (
                                             <CommandItem
                                                 key={item.value}
-                                                value={combinedSearchValue}
-                                                // We'll store the actual value and label in data attributes
+                                                value={item.value}
                                                 data-item-value={item.value}
                                                 data-item-label={item.label}
                                                 onSelect={() => {
-                                                    onAction?.(
-                                                        item.value,
-                                                        item.label
-                                                    );
-                                                    setValue(item.value);
-                                                    setSearch("");
-                                                    onOpenChange?.(false);
+                                                    const currentArgs =
+                                                        search.slice(
+                                                            getCommandPart(
+                                                                search
+                                                            ).length
+                                                        );
+                                                    const newSearch =
+                                                        item.value +
+                                                        currentArgs;
+                                                    setSearch(newSearch);
                                                 }}
                                             >
                                                 <div className="flex w-full items-center justify-between">
                                                     <span>{item.label}</span>
-                                                    {/* On the right side, show the value in small text */}
                                                     <span className="ml-2 text-sm text-gray-400">
                                                         {item.value}
                                                     </span>
                                                 </div>
                                             </CommandItem>
-                                        );
+                                        ) : null;
                                     })}
                                 </CommandGroup>
                             ))}

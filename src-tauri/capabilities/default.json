@@ -4,7 +4,7 @@
   "description": "enables the default permissions",
   "windows": [
     "main",
-    "window_0"
+    "im"
   ],
   "permissions": [
     "core:default",

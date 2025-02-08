@@ -2,7 +2,7 @@ use lazy_static::lazy_static;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use tauri::Manager;
+use tauri::{Emitter, EventTarget, Listener, Manager};
 
 lazy_static! {
     static ref window_names: HashMap<String, String> = {
@@ -22,29 +22,75 @@ async fn create_window(
     state: tauri::State<'_, Mutex<AppState>>,
     name: String,
 ) -> Result<(), String> {
-    // TODO: As we are accessing a dynamic path, functions such as im should have some path like '/im/group1' and '/im/group2'. The window_id will be the same
-    // For some difficult task that is logic based, we can use binding and write it in Python or C++, compile the binary and use it in Rust
     println!("Creating window: {}", name);
-    if (app.get_webview_window(&name)).is_some() {
-        app.get_webview_window(&name).unwrap().set_focus().unwrap();
+    let new_name = name.clone();
+    let window_id = format!("{}", new_name);
+    let _ = if let Some(existing_window) = app.get_webview_window(&name) {
+        existing_window.set_focus().unwrap();
+        let _ = app.emit_to(EventTarget::webview_window("im"), "window_created", ());
+        existing_window
     } else {
-        let new_name = name.clone(); // Rust points the reference to the same memory address
         let mut state = state.lock().unwrap();
-        let window_id = format!("{}", new_name);
         println!("New window id: {}", window_id);
+
         let path: PathBuf = Path::new(window_names.get(&new_name).unwrap()).into();
         let webview_url = tauri::WebviewUrl::App(path);
-        tauri::WebviewWindowBuilder::new(&app, &window_id, webview_url.clone())
+
+        let window = tauri::WebviewWindowBuilder::new(&app, &window_id, webview_url.clone())
             .title(&name)
+            .inner_size(1200.00, 800.00)
             .build()
             .unwrap();
-        // At the end of the scope, it will lock the mutex again
+
+        // window.open_devtools();
         state.window_id += 1;
-    }
-    // This will unlock the mutex with .unwrap(), and thus accessing the state of
-    println!("Ended");
+        window
+    };
+    println!("Window creation completed for: {}", name);
+    let _ = app.emit_to(EventTarget::webview_window("im"), "cmd_request", ());
     Ok(())
 }
+
+#[tauri::command]
+async fn command_handling(
+    app: tauri::AppHandle,
+    args: String,
+    command: String,
+) -> Result<(), String> {
+    // Check if args is empty
+    println!("Command: {}", command);
+    println!("Args: {}", args);
+    if args.is_empty() {
+        Ok(())
+    } else {
+        match command.as_str() {
+            "im" => {
+                let _ = app.emit_to(
+                    EventTarget::webview_window("im"),
+                    "target_field",
+                    args.clone(),
+                );
+            }
+            _ => {
+                println!("Command not found: {}", command);
+            }
+        }
+        Ok(())
+    }
+}
+
+// async fn command_name(state: tauri::State<'_, MyState>) -> Result<(), String> {
+//   *state.s.lock().unwrap() = "new string".into();
+//   state.t.lock().unwrap().insert("key".into(), "value".into());
+//   Ok(())
+// }
+
+// #[derive(Default)]
+// struct MyState {
+//   s: std::sync::Mutex<String>,
+//   t: std::sync::Mutex<std::collections::HashMap<String, String>>,
+// }
+// remember to call `.manage(MyState::default())`
 
 #[derive(Default)]
 struct AppState {
@@ -60,6 +106,10 @@ pub fn run() {
         .setup(|app| {
             #[cfg(desktop)]
             {
+                app.listen_any("test", |event| {
+                    println!("Recived event: {:?}", event.payload());
+                });
+
                 use tauri_plugin_global_shortcut::{
                     Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState,
                 };
@@ -90,10 +140,10 @@ pub fn run() {
             }
             app.manage(Mutex::new(AppState::default()));
             #[cfg(debug_assertions)]
-            app.get_webview_window("main").unwrap().open_devtools();
+            // app.get_webview_window("main").unwrap().open_devtools();
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![create_window])
+        .invoke_handler(tauri::generate_handler![create_window, command_handling])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

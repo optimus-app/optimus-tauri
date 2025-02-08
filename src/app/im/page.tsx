@@ -1,7 +1,7 @@
 "use client";
 
-import * as React from "react";
-import { Check, Plus, Send } from "lucide-react";
+import { useState, useEffect, useMemo, useRef } from "react";
+import { Check, Plus, Send, GalleryVerticalEnd } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -35,6 +35,36 @@ import {
     TooltipProvider,
     TooltipTrigger,
 } from "@/components/ui/tooltip";
+import {
+    Breadcrumb,
+    BreadcrumbItem,
+    BreadcrumbLink,
+    BreadcrumbList,
+    BreadcrumbPage,
+    BreadcrumbSeparator,
+} from "@/components/ui/breadcrumb";
+import { Separator } from "@/components/ui/separator";
+import {
+    SidebarInset,
+    SidebarProvider,
+    SidebarTrigger,
+} from "@/components/ui/sidebar";
+import { Skeleton } from "@/components/ui/skeleton";
+import { AppSidebar } from "@/components/app-sidebar";
+import WebSocketManager from "../utils/WebSocketManager";
+import HTTPRequestManager, { Methods } from "../utils/HTTPRequestManager";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { useTheme } from "next-themes";
+import { emitTo, listen } from "@tauri-apps/api/event";
+
+const ChatSkeleton = () => (
+    <div className="space-y-4 p-4">
+        <Skeleton className="h-12 w-[200px] ml-0" />
+        <Skeleton className="h-12 w-[300px] ml-auto" />
+        <Skeleton className="h-12 w-[250px] ml-0" />
+        <Skeleton className="h-12 w-[200px] ml-auto" />
+    </div>
+);
 
 const users = [
     {
@@ -66,120 +96,410 @@ const users = [
 
 type User = (typeof users)[number];
 
-export default function CardsChat() {
-    const [open, setOpen] = React.useState(false);
-    const [selectedUsers, setSelectedUsers] = React.useState<User[]>([]);
+interface Message {
+    role: string;
+    content: string;
+}
 
-    const [messages, setMessages] = React.useState([
-        {
-            role: "agent",
-            content: "Hi, how can I help you today?",
-        },
-        {
-            role: "user",
-            content: "Hey, I'm having trouble with my account.",
-        },
-        {
-            role: "agent",
-            content: "What seems to be the problem?",
-        },
-        {
-            role: "user",
-            content: "I can't log in.",
-        },
-    ]);
-    const [input, setInput] = React.useState("");
+async function sendMessageToServer(
+    chatRoom: number,
+    content: string,
+    user: string,
+    httpManager: HTTPRequestManager
+) {
+    const payload = {
+        content: content,
+        sender: user,
+        roomId: chatRoom,
+    };
+    try {
+        await httpManager
+            .handleRequest("chat/message", Methods.POST, payload)
+            .then((r) => {
+                console.log("Sent!", r);
+            });
+    } catch (error) {
+        console.error("Message send error:", error);
+    }
+}
+
+const userName = "user4";
+
+export default function CardsChat() {
+    const { setTheme } = useTheme();
+    setTheme("dark");
+    const wsManager = useMemo(() => WebSocketManager.getInstance(), []);
+    const httpManager = useMemo(() => HTTPRequestManager.getInstance(), []);
+
+    const [open, setOpen] = useState(false);
+    const [selectedUsers, setSelectedUsers] = useState<User[]>([]);
+    const [messages, setMessages] = useState<Message[]>([]);
+    const [input, setInput] = useState("");
     const inputLength = input.trim().length;
+    const [chatData, setChatData] = useState<any>({ navMain: [] });
+    const [isLoading, setIsLoading] = useState(true);
+    const [activeChatId, setActiveChatId] = useState<number | null>(null);
+    const [activeChatName, setActiveChatName] = useState<string>("");
+
+    const lastMessageRef = useRef<HTMLDivElement>(null);
+
+    // --- Load messages for a given chat room ---
+    const loadChatMessages = async (chatId: number) => {
+        setIsLoading(true);
+        setMessages([]);
+
+        try {
+            const response = await httpManager.handleRequest(
+                `chat/messages/${chatId}`,
+                Methods.GET,
+                null
+            );
+
+            let messagesArray;
+            // New response structure: object with messages, roomTitle, etc.
+            if (response && response.messages) {
+                messagesArray = response.messages;
+                setActiveChatName(response.roomTitle || "Chat");
+            } else if (Array.isArray(response)) {
+                messagesArray = response;
+                const chatRoom = chatData.navMain[0].items.find(
+                    (item: any) => item.id === chatId
+                );
+                setActiveChatName(chatRoom?.title || "Chat");
+            } else {
+                messagesArray = [];
+            }
+
+            messagesArray.forEach((item: any) => {
+                setMessages((prev) => [
+                    ...prev,
+                    {
+                        role: item.sender === userName ? "user" : "agent",
+                        content: item.content,
+                    },
+                ]);
+            });
+        } catch (error) {
+            console.error("Failed to load chat messages:", error);
+            setMessages([
+                {
+                    role: "system",
+                    content: "Failed to load messages. Please try again later.",
+                },
+            ]);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    // Auto-scroll to bottom when messages change.
+    useEffect(() => {
+        if (lastMessageRef.current) {
+            lastMessageRef.current.scrollIntoView({
+                behavior: "smooth",
+                block: "end",
+            });
+        }
+    }, [messages]);
+
+    const [isChatDataReady, setIsChatDataReady] = useState(false);
+    const [isWebSocketReady, setIsWebSocketReady] = useState(false);
+
+    const unlistenRef = useRef<(() => void) | null>(null);
+
+    // --- Fetch Chat Room(s) ---
+    useEffect(() => {
+        const getChatRoom = async () => {
+            try {
+                const response = await httpManager.handleRequest(
+                    `chat/chatRoom/${userName}`,
+                    Methods.GET,
+                    null
+                );
+
+                console.log("Chat room response: ", response);
+                // Allow for a single object or an array of rooms.
+                const rooms = Array.isArray(response) ? response : [response];
+
+                const formattedData = {
+                    navMain: [
+                        {
+                            title: "Messages",
+                            url: "#",
+                            id: 0,
+                            items: rooms.map((room: any) => ({
+                                title: room.roomTitle,
+                                url: "#",
+                                id: room.roomId,
+                                // Format members as a comma-separated string.
+                                members: room.members
+                                    ? room.members.join(", ")
+                                    : "",
+                                isActive: false,
+                            })),
+                        },
+                    ],
+                };
+                setChatData(formattedData);
+                setIsChatDataReady(true);
+            } catch (error) {
+                console.error("Error fetching chat rooms!", error);
+            }
+        };
+
+        getChatRoom();
+    }, [httpManager]);
+
+    // --- Set up WebSocket for messages ---
+    useEffect(() => {
+        if (!isChatDataReady) return;
+
+        const initWebSocket = async () => {
+            try {
+                wsManager.addSubscriptionPath(
+                    `/subscribe/chat/messages/${userName}`,
+                    (msg: any) => {
+                        setMessages((prev) => [
+                            ...prev,
+                            {
+                                role:
+                                    msg.sender === userName ? "user" : "agent",
+                                content: msg.content,
+                            },
+                        ]);
+                    }
+                );
+                await wsManager.start();
+                setIsWebSocketReady(true);
+            } catch (error) {
+                console.error("WebSocket initialization failed:", error);
+            }
+        };
+
+        initWebSocket();
+
+        return () => {
+            wsManager.disconnect();
+            setIsWebSocketReady(false);
+        };
+    }, [isChatDataReady, wsManager]);
+
+    // --- Set up Tauri event listeners ---
+    useEffect(() => {
+        if (!isWebSocketReady) return;
+
+        const setupTauriListener = async () => {
+            try {
+                await emitTo("main", "window_created", "from im");
+                const unlisten = await listen<any>("targetfield", (event) => {
+                    console.log("Received event", event.payload);
+                    console.log("Args", event.payload.args);
+                    console.log("Command", event.payload.command);
+
+                    const args = event.payload.args;
+                    if (!args || args.trim() === "") {
+                        console.log("Nothing");
+                        return;
+                    }
+
+                    const matchingRoom = chatData.navMain[0].items.find(
+                        (item: any) =>
+                            item.title.toLowerCase() === args.toLowerCase()
+                    );
+
+                    if (matchingRoom) {
+                        console.log("Found matching room:", matchingRoom);
+                        setActiveChatId(matchingRoom.id);
+                        setActiveChatName(matchingRoom.title);
+                        loadChatMessages(matchingRoom.id);
+                    } else {
+                        console.log("No matching room found for:", args);
+                    }
+                });
+                unlistenRef.current = unlisten;
+                console.log("Tauri listener setup complete");
+            } catch (error) {
+                console.error("Tauri listener setup failed:", error);
+            }
+        };
+
+        setupTauriListener();
+
+        return () => {
+            if (unlistenRef.current) {
+                unlistenRef.current();
+            }
+        };
+    }, [isWebSocketReady, chatData]);
+
+    // Determine the current active chat room from chatData for header display.
+    const currentRoom =
+        activeChatId && chatData.navMain[0]
+            ? chatData.navMain[0].items.find(
+                  (item: any) => item.id === activeChatId
+              )
+            : null;
 
     return (
-        <div className="font-[family-name:var(--font-geist-sans)]">
-            <Card>
-                <CardHeader className="flex flex-row items-center">
-                    <div className="flex items-center space-x-4">
-                        <Avatar>
-                            <AvatarImage src="/avatars/01.png" alt="Image" />
-                            <AvatarFallback>OM</AvatarFallback>
-                        </Avatar>
-                        <div>
-                            <p className="text-sm font-medium leading-none">
-                                Sofia Davis
-                            </p>
-                            <p className="text-sm text-muted-foreground">
-                                m@example.com
-                            </p>
+        <SidebarProvider
+            style={
+                {
+                    "--sidebar-width": "19rem",
+                } as React.CSSProperties
+            }
+        >
+            <AppSidebar
+                data={chatData}
+                username={userName}
+                onChatSelect={(chatId) => {
+                    console.log("selected chat", chatId);
+                    setActiveChatId(Number(chatId));
+                    loadChatMessages(Number(chatId));
+                }}
+                activeRoomId={activeChatId || undefined}
+            />
+            <SidebarInset>
+                <header className="flex h-16 shrink-0 items-center gap-2 px-4">
+                    <SidebarTrigger className="-ml-1" />
+                    <Separator orientation="vertical" className="mr-2 h-4" />
+                    <Breadcrumb>
+                        <BreadcrumbList>
+                            <BreadcrumbItem className="hidden md:block">
+                                <BreadcrumbLink href="#">
+                                    Messages
+                                </BreadcrumbLink>
+                            </BreadcrumbItem>
+                            <BreadcrumbSeparator className="hidden md:block" />
+                            <BreadcrumbItem>
+                                <BreadcrumbPage>
+                                    {activeChatName || "Select a chat"}
+                                </BreadcrumbPage>
+                            </BreadcrumbItem>
+                        </BreadcrumbList>
+                    </Breadcrumb>
+                </header>
+                <div className="flex flex-1 flex-col p-4 pt-0 h-[calc(100vh-4rem)]">
+                    {!activeChatId ? (
+                        <div className="flex h-full items-center justify-center text-muted-foreground">
+                            Select a chat to start messaging
                         </div>
-                    </div>
-                    <TooltipProvider delayDuration={0}>
-                        <Tooltip>
-                            <TooltipTrigger asChild>
-                                <Button
-                                    size="icon"
-                                    variant="outline"
-                                    className="ml-auto rounded-full"
-                                    onClick={() => setOpen(true)}
+                    ) : (
+                        <Card className="flex flex-col h-full">
+                            <CardHeader className="flex flex-row items-center shrink-0">
+                                <div className="flex items-center space-x-4">
+                                    <Avatar>
+                                        <AvatarImage
+                                            src="/avatars/01.png"
+                                            alt="Chat avatar"
+                                        />
+                                        <AvatarFallback>
+                                            {activeChatName
+                                                ? activeChatName.charAt(0)
+                                                : "C"}
+                                        </AvatarFallback>
+                                    </Avatar>
+                                    <div>
+                                        <p className="text-sm font-medium leading-none">
+                                            {activeChatName || "Chat"}
+                                        </p>
+                                        <p className="text-sm text-muted-foreground">
+                                            {currentRoom && currentRoom.members
+                                                ? currentRoom.members
+                                                : ""}
+                                        </p>
+                                    </div>
+                                </div>
+                                <TooltipProvider delayDuration={0}>
+                                    <Tooltip>
+                                        <TooltipTrigger asChild>
+                                            <Button
+                                                size="icon"
+                                                variant="outline"
+                                                className="ml-auto rounded-full"
+                                                onClick={() => setOpen(true)}
+                                            >
+                                                <Plus />
+                                                <span className="sr-only">
+                                                    New message
+                                                </span>
+                                            </Button>
+                                        </TooltipTrigger>
+                                        <TooltipContent sideOffset={10}>
+                                            New message
+                                        </TooltipContent>
+                                    </Tooltip>
+                                </TooltipProvider>
+                            </CardHeader>
+                            <CardContent className="flex-1 min-h-0 p-0">
+                                <ScrollArea className="h-full">
+                                    {isLoading ? (
+                                        <ChatSkeleton />
+                                    ) : messages.length === 0 ? (
+                                        <div className="flex h-full items-center justify-center text-muted-foreground">
+                                            No messages found
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-4 p-4">
+                                            {messages.map((message, index) => (
+                                                <div
+                                                    key={index}
+                                                    className={cn(
+                                                        "flex w-max max-w-[75%] flex-col gap-2 rounded-lg px-3 py-2 text-sm",
+                                                        message.role === "user"
+                                                            ? "ml-auto bg-primary text-primary-foreground"
+                                                            : message.role ===
+                                                              "system"
+                                                            ? "mx-auto bg-destructive text-destructive-foreground"
+                                                            : "bg-muted"
+                                                    )}
+                                                >
+                                                    {message.content}
+                                                </div>
+                                            ))}
+                                            <div ref={lastMessageRef} />
+                                        </div>
+                                    )}
+                                </ScrollArea>
+                            </CardContent>
+                            <CardFooter className="shrink-0">
+                                <form
+                                    onSubmit={(event) => {
+                                        event.preventDefault();
+                                        if (inputLength === 0) return;
+                                        setInput("");
+                                        sendMessageToServer(
+                                            Number(activeChatId),
+                                            input,
+                                            userName,
+                                            httpManager
+                                        );
+                                    }}
+                                    className="flex w-full items-center space-x-2"
                                 >
-                                    <Plus />
-                                    <span className="sr-only">New message</span>
-                                </Button>
-                            </TooltipTrigger>
-                            <TooltipContent sideOffset={10}>
-                                New message
-                            </TooltipContent>
-                        </Tooltip>
-                    </TooltipProvider>
-                </CardHeader>
-                <CardContent>
-                    <div className="space-y-4">
-                        {messages.map((message, index) => (
-                            <div
-                                key={index}
-                                className={cn(
-                                    "flex w-max max-w-[75%] flex-col gap-2 rounded-lg px-3 py-2 text-sm",
-                                    message.role === "user"
-                                        ? "ml-auto bg-primary text-primary-foreground"
-                                        : "bg-muted"
-                                )}
-                            >
-                                {message.content}
-                            </div>
-                        ))}
-                    </div>
-                </CardContent>
-                <CardFooter>
-                    <form
-                        onSubmit={(event) => {
-                            event.preventDefault();
-                            if (inputLength === 0) return;
-                            setMessages([
-                                ...messages,
-                                {
-                                    role: "user",
-                                    content: input,
-                                },
-                            ]);
-                            setInput("");
-                        }}
-                        className="flex w-full items-center space-x-2"
-                    >
-                        <Input
-                            id="message"
-                            placeholder="Type your message..."
-                            className="flex-1"
-                            autoComplete="off"
-                            value={input}
-                            onChange={(event) => setInput(event.target.value)}
-                        />
-                        <Button
-                            type="submit"
-                            size="icon"
-                            disabled={inputLength === 0}
-                        >
-                            <Send />
-                            <span className="sr-only">Send</span>
-                        </Button>
-                    </form>
-                </CardFooter>
-            </Card>
+                                    <Input
+                                        id="message"
+                                        placeholder="Type your message..."
+                                        className="flex-1"
+                                        autoComplete="off"
+                                        value={input}
+                                        onChange={(event) =>
+                                            setInput(event.target.value)
+                                        }
+                                    />
+                                    <Button
+                                        type="submit"
+                                        size="icon"
+                                        disabled={inputLength === 0}
+                                    >
+                                        <Send />
+                                        <span className="sr-only">Send</span>
+                                    </Button>
+                                </form>
+                            </CardFooter>
+                        </Card>
+                    )}
+                </div>
+            </SidebarInset>
             <Dialog open={open} onOpenChange={setOpen}>
                 <DialogContent className="gap-0 p-0 outline-none">
                     <DialogHeader className="px-4 pb-4 pt-5">
@@ -208,15 +528,10 @@ export default function CardsChat() {
                                                     )
                                                 );
                                             }
-
-                                            return setSelectedUsers(
-                                                [...users].filter((u) =>
-                                                    [
-                                                        ...selectedUsers,
-                                                        user,
-                                                    ].includes(u)
-                                                )
-                                            );
+                                            return setSelectedUsers([
+                                                ...selectedUsers,
+                                                user,
+                                            ]);
                                         }}
                                     >
                                         <Avatar>
@@ -266,15 +581,13 @@ export default function CardsChat() {
                         )}
                         <Button
                             disabled={selectedUsers.length < 2}
-                            onClick={() => {
-                                setOpen(false);
-                            }}
+                            onClick={() => setOpen(false)}
                         >
                             Continue
                         </Button>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
-        </div>
+        </SidebarProvider>
     );
 }
