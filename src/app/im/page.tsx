@@ -55,6 +55,7 @@ import WebSocketManager from "../utils/WebSocketManager";
 import HTTPRequestManager, { Methods } from "../utils/HTTPRequestManager";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useTheme } from "next-themes";
+import { emitTo, listen } from "@tauri-apps/api/event";
 
 const ChatSkeleton = () => (
     <div className="space-y-4 p-4">
@@ -144,22 +145,20 @@ export default function CardsChat() {
 
     const loadChatMessages = async (chatId: number) => {
         setIsLoading(true);
-        setMessages([]); // Clear existing messages
+        setMessages([]);
 
         try {
             const response = await httpManager.handleRequest(
                 `chat/messages/${chatId}`,
                 Methods.GET,
                 null
-            ); // Note: changed from chatRoom to messages
+            );
 
-            // Update chat name
             const chatRoom = chatData.navMain[0].items.find(
                 (item: any) => item.id === chatId
             );
             setActiveChatName(chatRoom?.title || "Chat");
 
-            // Check if response is an array
             if (Array.isArray(response)) {
                 response.forEach((item: any) => {
                     setMessages((prev) => [
@@ -176,8 +175,6 @@ export default function CardsChat() {
             }
         } catch (error) {
             console.error("Failed to load chat messages:", error);
-            // Keep the loading state if there's an error
-            // You might want to show an error message to the user
             setMessages([
                 {
                     role: "system",
@@ -190,7 +187,59 @@ export default function CardsChat() {
     };
 
     useEffect(() => {
-        const wsInit = async () => {
+        if (lastMessageRef.current) {
+            lastMessageRef.current.scrollIntoView({
+                behavior: "smooth",
+                block: "end",
+            });
+        }
+    }, [messages]);
+
+    const [isChatDataReady, setIsChatDataReady] = useState(false);
+    const [isWebSocketReady, setIsWebSocketReady] = useState(false);
+
+    const unlistenRef = useRef<(() => void) | null>(null);
+    // First useEffect for fetching chat rooms and initializing chatData
+    useEffect(() => {
+        const getChatRoom = async () => {
+            try {
+                const response = await httpManager.handleRequest(
+                    `chat/chatRoom/${userName}`,
+                    Methods.GET,
+                    null
+                );
+
+                console.log("Responses: ", response);
+                const formattedData = {
+                    navMain: [
+                        {
+                            title: "Messages",
+                            url: "#",
+                            id: 0,
+                            items: response.map((room: any) => ({
+                                title: room.roomTitle,
+                                url: "#",
+                                id: room.roomId,
+                                isActive: false,
+                            })),
+                        },
+                    ],
+                };
+                setChatData(formattedData);
+                setIsChatDataReady(true); // Signal that chatData is ready
+            } catch (error) {
+                console.log("Error fetching chat rooms!", error);
+            }
+        };
+
+        getChatRoom();
+    }, [httpManager]);
+
+    // Second useEffect for WebSocket setup - triggered by chatData ready
+    useEffect(() => {
+        if (!isChatDataReady) return;
+
+        const initWebSocket = async () => {
             try {
                 wsManager.addSubscriptionPath(
                     `/subscribe/chat/messages/${userName}`,
@@ -206,87 +255,71 @@ export default function CardsChat() {
                     }
                 );
                 await wsManager.start();
+                setIsWebSocketReady(true); // Signal that WebSocket is ready
             } catch (error) {
-                console.error("WebSocket subscription failed", error);
+                console.error("WebSocket initialization failed:", error);
             }
         };
-        wsInit();
+
+        initWebSocket();
+
         return () => {
             wsManager.disconnect();
+            setIsWebSocketReady(false);
         };
-    }, [wsManager]);
+    }, [isChatDataReady, wsManager]); // Depend on isChatDataReady instead of chatData
 
-    // useEffect(() => {
-    //     const fetchInitialMessage = async () => {
-    //         try {
-    //             await httpManager
-    //                 .handleRequest("chat/messages/1", Methods.GET, null)
-    //                 .then((r) => {
-    //                     console.log("Sent!", r);
-    //                     r.forEach((item: any) => {
-    //                         setMessages((prev) => [
-    //                             ...prev,
-    //                             {
-    //                                 role:
-    //                                     item.sender === "user1"
-    //                                         ? "user"
-    //                                         : "agent",
-    //                                 content: item.content,
-    //                             },
-    //                         ]);
-    //                     });
-    //                 });
-    //         } catch (error) {
-    //             console.error("Did not send it out!", error);
-    //         }
-    //     };
-
-    //     fetchInitialMessage();
-    // }, [httpManager]);
-
+    // Third useEffect for Tauri event listeners - triggered by WebSocket ready
     useEffect(() => {
-        if (lastMessageRef.current) {
-            lastMessageRef.current.scrollIntoView({
-                behavior: "smooth",
-                block: "end",
-            });
-        }
-    }, [messages]);
+        if (!isWebSocketReady) return;
 
-    useEffect(() => {
-        const getChatRoom = async () => {
+        const setupTauriListener = async () => {
             try {
-                const response = await httpManager
-                    .handleRequest(
-                        `chat/chatRoom/${userName}`,
-                        Methods.GET,
-                        null
-                    )
-                    .then((r) => {
-                        console.log("Responses: ", r);
-                        const formattedData = {
-                            navMain: [
-                                {
-                                    title: "Messages",
-                                    url: "#",
-                                    id: 0,
-                                    items: r.map((room: any) => ({
-                                        title: room.roomTitle,
-                                        url: "#",
-                                        id: room.roomId,
-                                        isActive: false,
-                                    })),
-                                },
-                            ],
-                        };
-                        setChatData(formattedData);
-                    });
+                await emitTo("main", "window_created", "from im");
+                const unlisten = await listen<any>("targetfield", (event) => {
+                    console.log("Received event", event.payload);
+                    console.log("Args", event.payload.args);
+                    console.log("Command", event.payload.command);
+
+                    const args = event.payload.args;
+                    if (!args || args.trim() === "") {
+                        console.log("Nothing");
+                        return;
+                    }
+
+                    const matchingRoom = chatData.navMain[0].items.find(
+                        (item: any) =>
+                            item.title.toLowerCase() ===
+                            event.payload.args.toLowerCase()
+                    );
+
+                    if (matchingRoom) {
+                        console.log("Found matching room:", matchingRoom);
+                        setActiveChatId(matchingRoom.id);
+                        setActiveChatName(matchingRoom.title);
+                        loadChatMessages(matchingRoom.id);
+                    } else {
+                        console.log(
+                            "No matching room found for:",
+                            event.payload.args
+                        );
+                    }
+                });
+                unlistenRef.current = unlisten;
+                console.log("Tauri listener setup complete");
             } catch (error) {
-                console.log("Error!", error);
+                console.error("Tauri listener setup failed:", error);
             }
         };
-        getChatRoom();
-    }, [httpManager]);
+
+        setupTauriListener();
+
+        return () => {
+            if (unlistenRef.current) {
+                unlistenRef.current();
+            }
+        };
+    }, [isWebSocketReady, chatData, loadChatMessages]); // Depend on isWebSocketReady
 
     return (
         <SidebarProvider
