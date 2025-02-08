@@ -1,10 +1,9 @@
 "use client";
-import { useState, useCallback, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { CommandLineInput } from "./components/command-line";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { emit, emitTo, listen } from "@tauri-apps/api/event";
-import { resolve } from "path";
+import { emitTo, listen } from "@tauri-apps/api/event";
 
 export default function Home() {
     const [isFocused, setIsFocused] = useState(false);
@@ -41,6 +40,23 @@ export default function Home() {
             "Window creation completed, proceeding with additional actions"
         );
     };
+
+    useEffect(() => {
+        const setupFocusListener = async () => {
+            const unlisten = await getCurrentWindow().onFocusChanged(
+                ({ payload: focused }) => {
+                    console.log("Focus changed, window is focused? " + focused);
+                    setIsFocused(focused);
+                    setOpenCommandLine(focused);
+                }
+            );
+
+            return () => {
+                unlisten(); // Cleanup on component unmount
+            };
+        };
+        setupFocusListener();
+    }, []);
 
     return (
         <>

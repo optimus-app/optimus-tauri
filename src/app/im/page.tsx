@@ -107,19 +107,19 @@ async function sendMessageToServer(
     user: string,
     httpManager: HTTPRequestManager
 ) {
-    let payload = {
+    const payload = {
         content: content,
         sender: user,
         roomId: chatRoom,
     };
     try {
-        const response = await httpManager
+        await httpManager
             .handleRequest("chat/message", Methods.POST, payload)
             .then((r) => {
                 console.log("Sent!", r);
             });
     } catch (error) {
-        console.error("Lolololololololol!", error);
+        console.error("Message send error:", error);
     }
 }
 
@@ -143,6 +143,7 @@ export default function CardsChat() {
 
     const lastMessageRef = useRef<HTMLDivElement>(null);
 
+    // --- Load messages for a given chat room ---
     const loadChatMessages = async (chatId: number) => {
         setIsLoading(true);
         setMessages([]);
@@ -154,25 +155,30 @@ export default function CardsChat() {
                 null
             );
 
-            const chatRoom = chatData.navMain[0].items.find(
-                (item: any) => item.id === chatId
-            );
-            setActiveChatName(chatRoom?.title || "Chat");
-
-            if (Array.isArray(response)) {
-                response.forEach((item: any) => {
-                    setMessages((prev) => [
-                        ...prev,
-                        {
-                            role: item.sender === userName ? "user" : "agent",
-                            content: item.content,
-                        },
-                    ]);
-                });
+            let messagesArray;
+            // New response structure: object with messages, roomTitle, etc.
+            if (response && response.messages) {
+                messagesArray = response.messages;
+                setActiveChatName(response.roomTitle || "Chat");
+            } else if (Array.isArray(response)) {
+                messagesArray = response;
+                const chatRoom = chatData.navMain[0].items.find(
+                    (item: any) => item.id === chatId
+                );
+                setActiveChatName(chatRoom?.title || "Chat");
             } else {
-                console.error("Unexpected response format:", response);
-                throw new Error("Invalid response format");
+                messagesArray = [];
             }
+
+            messagesArray.forEach((item: any) => {
+                setMessages((prev) => [
+                    ...prev,
+                    {
+                        role: item.sender === userName ? "user" : "agent",
+                        content: item.content,
+                    },
+                ]);
+            });
         } catch (error) {
             console.error("Failed to load chat messages:", error);
             setMessages([
@@ -186,6 +192,7 @@ export default function CardsChat() {
         }
     };
 
+    // Auto-scroll to bottom when messages change.
     useEffect(() => {
         if (lastMessageRef.current) {
             lastMessageRef.current.scrollIntoView({
@@ -199,7 +206,8 @@ export default function CardsChat() {
     const [isWebSocketReady, setIsWebSocketReady] = useState(false);
 
     const unlistenRef = useRef<(() => void) | null>(null);
-    // First useEffect for fetching chat rooms and initializing chatData
+
+    // --- Fetch Chat Room(s) ---
     useEffect(() => {
         const getChatRoom = async () => {
             try {
@@ -209,33 +217,40 @@ export default function CardsChat() {
                     null
                 );
 
-                console.log("Responses: ", response);
+                console.log("Chat room response: ", response);
+                // Allow for a single object or an array of rooms.
+                const rooms = Array.isArray(response) ? response : [response];
+
                 const formattedData = {
                     navMain: [
                         {
                             title: "Messages",
                             url: "#",
                             id: 0,
-                            items: response.map((room: any) => ({
+                            items: rooms.map((room: any) => ({
                                 title: room.roomTitle,
                                 url: "#",
                                 id: room.roomId,
+                                // Format members as a comma-separated string.
+                                members: room.members
+                                    ? room.members.join(", ")
+                                    : "",
                                 isActive: false,
                             })),
                         },
                     ],
                 };
                 setChatData(formattedData);
-                setIsChatDataReady(true); // Signal that chatData is ready
+                setIsChatDataReady(true);
             } catch (error) {
-                console.log("Error fetching chat rooms!", error);
+                console.error("Error fetching chat rooms!", error);
             }
         };
 
         getChatRoom();
     }, [httpManager]);
 
-    // Second useEffect for WebSocket setup - triggered by chatData ready
+    // --- Set up WebSocket for messages ---
     useEffect(() => {
         if (!isChatDataReady) return;
 
@@ -255,7 +270,7 @@ export default function CardsChat() {
                     }
                 );
                 await wsManager.start();
-                setIsWebSocketReady(true); // Signal that WebSocket is ready
+                setIsWebSocketReady(true);
             } catch (error) {
                 console.error("WebSocket initialization failed:", error);
             }
@@ -267,9 +282,9 @@ export default function CardsChat() {
             wsManager.disconnect();
             setIsWebSocketReady(false);
         };
-    }, [isChatDataReady, wsManager]); // Depend on isChatDataReady instead of chatData
+    }, [isChatDataReady, wsManager]);
 
-    // Third useEffect for Tauri event listeners - triggered by WebSocket ready
+    // --- Set up Tauri event listeners ---
     useEffect(() => {
         if (!isWebSocketReady) return;
 
@@ -289,8 +304,7 @@ export default function CardsChat() {
 
                     const matchingRoom = chatData.navMain[0].items.find(
                         (item: any) =>
-                            item.title.toLowerCase() ===
-                            event.payload.args.toLowerCase()
+                            item.title.toLowerCase() === args.toLowerCase()
                     );
 
                     if (matchingRoom) {
@@ -299,10 +313,7 @@ export default function CardsChat() {
                         setActiveChatName(matchingRoom.title);
                         loadChatMessages(matchingRoom.id);
                     } else {
-                        console.log(
-                            "No matching room found for:",
-                            event.payload.args
-                        );
+                        console.log("No matching room found for:", args);
                     }
                 });
                 unlistenRef.current = unlisten;
@@ -319,7 +330,15 @@ export default function CardsChat() {
                 unlistenRef.current();
             }
         };
-    }, [isWebSocketReady, chatData, loadChatMessages]); // Depend on isWebSocketReady
+    }, [isWebSocketReady, chatData]);
+
+    // Determine the current active chat room from chatData for header display.
+    const currentRoom =
+        activeChatId && chatData.navMain[0]
+            ? chatData.navMain[0].items.find(
+                  (item: any) => item.id === activeChatId
+              )
+            : null;
 
     return (
         <SidebarProvider
@@ -371,16 +390,22 @@ export default function CardsChat() {
                                     <Avatar>
                                         <AvatarImage
                                             src="/avatars/01.png"
-                                            alt="Image"
+                                            alt="Chat avatar"
                                         />
-                                        <AvatarFallback>OM</AvatarFallback>
+                                        <AvatarFallback>
+                                            {activeChatName
+                                                ? activeChatName.charAt(0)
+                                                : "C"}
+                                        </AvatarFallback>
                                     </Avatar>
                                     <div>
                                         <p className="text-sm font-medium leading-none">
-                                            Sofia Davis
+                                            {activeChatName || "Chat"}
                                         </p>
                                         <p className="text-sm text-muted-foreground">
-                                            m@example.com
+                                            {currentRoom && currentRoom.members
+                                                ? currentRoom.members
+                                                : ""}
                                         </p>
                                     </div>
                                 </div>

@@ -31,6 +31,7 @@ export function CommandLineInput({
     const [search, setSearch] = React.useState("");
     const [value, setValue] = React.useState("");
     const inputRef = React.useRef<HTMLInputElement>(null);
+
     const parseCommandLine = (input: string) => {
         const parts = input.trim().match(/("[^"]+"|[^\s"]+)/g) || [];
         return parts.map((part) => part.replace(/^"(.*)"$/, "$1"));
@@ -66,31 +67,41 @@ export function CommandLineInput({
     }, [onOpenChange]);
 
     const handleKeyDown = (e: React.KeyboardEvent) => {
-        const highlightedItem = document.querySelector(
-            '[cmdk-item][aria-selected="true"]'
-        ) as HTMLElement | null;
+        try {
+            const highlightedItem = document.querySelector(
+                '[cmdk-item][aria-selected="true"]'
+            ) as HTMLElement | null;
 
-        if (e.key === "Enter") {
-            if (search.trim()) {
-                const parts = parseCommandLine(search);
-                const command = parts[0];
-                const args = parts.slice(1);
-                onAction?.(command, args, search);
-                setSearch("");
-                onOpenChange?.(false);
-                inputRef.current?.blur();
+            if (e.key === "Enter") {
+                e.preventDefault();
+                if (search.trim()) {
+                    const parts = parseCommandLine(search);
+                    const command = parts[0];
+                    const args = parts.slice(1);
+                    onAction?.(command, args, search);
+                    setSearch("");
+                    onOpenChange?.(false);
+                    inputRef.current?.blur();
+                }
+            } else if (e.key === "Tab" && highlightedItem) {
+                e.preventDefault();
+                const currentValue =
+                    highlightedItem.getAttribute("data-item-value");
+                if (currentValue) {
+                    const currentArgs = search.slice(
+                        getCommandPart(search).length
+                    );
+                    setSearch(currentValue + currentArgs);
+                }
+            } else if (e.key === "Escape") {
+                setTimeout(() => {
+                    onOpenChange?.(false);
+                    inputRef.current?.blur();
+                }, 0);
             }
-        } else if (e.key === "Tab" && highlightedItem) {
-            e.preventDefault();
-            const currentValue =
-                highlightedItem.getAttribute("data-item-value");
-            if (currentValue) {
-                const currentArgs = search.slice(getCommandPart(search).length);
-                setSearch(currentValue + currentArgs);
-            }
-        } else if (e.key === "Escape") {
-            onOpenChange?.(false);
-            inputRef.current?.blur();
+        } catch (error) {
+            // Optionally log the error if needed, but don't rethrow it.
+            console.error("KeyDown handler error:", error);
         }
     };
 

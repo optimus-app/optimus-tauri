@@ -1,3 +1,5 @@
+"use client";
+
 import * as React from "react";
 import { useState, useEffect } from "react";
 import { GalleryVerticalEnd } from "lucide-react";
@@ -47,6 +49,8 @@ export function AppSidebar({
     activeRoomId,
     ...props
 }: AppSidebarProps) {
+    // Initially, the time is computed on the server, and may differ from the client.
+    // To prevent a hydration error, we use the suppressHydrationWarning prop.
     const [currentTime, setCurrentTime] = useState(
         new Date().toLocaleTimeString()
     );
@@ -85,7 +89,10 @@ export function AppSidebar({
                                     <span className="font-semibold">
                                         {username}
                                     </span>
-                                    <span className="">{currentTime}</span>
+                                    {/* Using suppressHydrationWarning here prevents errors if the server time differs from the client */}
+                                    <span suppressHydrationWarning>
+                                        {currentTime}
+                                    </span>
                                 </div>
                             </a>
                         </SidebarMenuButton>
@@ -145,3 +152,5 @@ export function AppSidebar({
         </Sidebar>
     );
 }
+
+export default AppSidebar;
