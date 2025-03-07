@@ -3,8 +3,8 @@
 import React, { useEffect, useState } from "react";
 import Highcharts from "highcharts/highstock";
 import { emitTo, listen } from "@tauri-apps/api/event";
+import './style.css';
 
-// To be updated
 const serverURL = "http://127.0.0.1:8000";
 
 const Dashboard: React.FC = () => {
@@ -147,43 +147,32 @@ const Dashboard: React.FC = () => {
     };
 
     return (
-        <div>
+        <div className="dashboard-container">
             {Array.from(tickers).map((ticker) => (
                 <div 
                     key={ticker} 
-                    style={{ position: 'relative', display: 'flex', marginBottom: '20px' }}
+                    className="ticker-container"
                     onMouseEnter={() => setHoveredTicker(ticker)} 
                     onMouseLeave={() => setHoveredTicker(null)}
                 >
-                    <div>
+                    <div className="chart-container">
                         <div
                             id={`chart-${ticker}`}
-                            style={{ height: "400px", width: "800px" }}
                         ></div>
                         {hoveredTicker === ticker && (
                             <button 
                                 onClick={() => handleClose(ticker)} 
-                                style={{
-                                    position: 'absolute',
-                                    top: '0',
-                                    left: '15px',
-                                    backgroundColor: 'transparent',
-                                    border: 'none',
-                                    color: 'white',
-                                    fontSize: '30px',
-                                    opacity: 0.4,
-                                    cursor: 'pointer'
-                                }}
+                                className="close-button"
                             >
                                 ×
                             </button>
                         )}
                     </div>
-                    <div style={{ height: '400px', overflowY: 'auto' }}>
-                        <h3 style={{ textAlign: 'center', fontSize: '20px', margin: '10px 0', fontWeight: 'bold' }}>Latest {ticker} News</h3>
+                    <div className="news-container">
+                        <h3 className="news-title">Latest {ticker} News</h3>
                         {newsData.get(ticker)?.slice(0, 5).map((news, index) => (
-                            <div key={news.id} style={{ border: '1px solid #ccc', margin: '0 0 10px 0', padding: '10px', backgroundColor: 'transparent', fontSize: '12px' }}>
-                                <h4><strong>{index + 1}. {news.title}</strong></h4>
+                            <div key={news.id} className="news-item">
+                                <h4>{index + 1}. {news.title}</h4>
                                 <p>{news.description}</p>
                                 <p><strong>Sentiment:</strong> {news.insights[0]?.sentiment || 'N/A'}</p>
                                 <p><strong>Reasoning:</strong> {news.insights[0]?.sentiment_reasoning || 'N/A'}</p>
