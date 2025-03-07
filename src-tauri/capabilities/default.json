@@ -4,7 +4,8 @@
   "description": "enables the default permissions",
   "windows": [
     "main",
-    "im"
+    "im",
+    "dashboard"
   ],
   "permissions": [
     "core:default",

@@ -1,124 +1,199 @@
 "use client";
 
-import React from "react";
-import { ApexOptions } from "apexcharts";
-import { useState, useEffect } from "react";
-import dynamic from "next/dynamic";
+import React, { useEffect, useState } from "react";
+import Highcharts from "highcharts/highstock";
+import { emitTo, listen } from "@tauri-apps/api/event";
 
-const ReactApexChart = dynamic(() => import("react-apexcharts"), {
-    ssr: false,
-});
+// To be updated
+const serverURL = "http://127.0.0.1:8000";
 
-interface ChartState {
-    options: ApexOptions;
-    series: { name: string; data: { x: Date; y: number[] }[] }[];
-}
-
-export default function Dashboard() {
-    const [chartState, setChartState] = useState<ChartState>({
-        options: {
-            chart: {
-                type: "candlestick",
-                height: 350,
-                zoom: {
-                    enabled: true,
-                },
-                background: "#000",
-            },
-            title: {
-                text: "CandleStick Chart",
-                align: "left",
-                style: {
-                    color: "#fff",
-                },
-            },
-            xaxis: {
-                type: "datetime",
-                labels: {
-                    style: {
-                        colors: "#fff",
-                    },
-                },
-            },
-            yaxis: {
-                tooltip: {
-                    enabled: true,
-                },
-                labels: {
-                    style: {
-                        colors: "#fff",
-                    },
-                },
-            },
-            tooltip: {
-                theme: "dark",
-            },
-            grid: {
-                borderColor: "#444",
-            },
-        },
-        series: [
-            {
-                name: "Price Data",
-                data: [
-                    {
-                        x: new Date(1538778600000),
-                        y: [6629.81, 6650.5, 6623.04, 6633.33],
-                    },
-                    {
-                        x: new Date(1538780400000),
-                        y: [6632.01, 6643.59, 6620, 6630.11],
-                    },
-                    {
-                        x: new Date(1538782200000),
-                        y: [6630.71, 6648.95, 6623.34, 6635.65],
-                    },
-                ],
-            },
-        ],
-    });
+const Dashboard: React.FC = () => {
+    const [tickers, setTickers] = useState<Set<string>>(new Set());
+    const [charts, setCharts] = useState<Map<string, Highcharts.Chart>>(new Map());
+    const [newsData, setNewsData] = useState<Map<string, any[]>>(new Map());
+    const [hoveredTicker, setHoveredTicker] = useState<string | null>(null);
 
     useEffect(() => {
-        const fetchData = async () => {
-            const simulatedData = [
-                {
-                    x: new Date(1538784000000),
-                    y: [6635.65, 6651, 6629.67, 6638.24],
-                },
-                {
-                    x: new Date(1538785800000),
-                    y: [6638.24, 6640, 6620, 6624.47],
-                },
-                {
-                    x: new Date(1538787600000),
-                    y: [6624.53, 6636.03, 6621.68, 6624.31],
-                },
-            ];
+        const setupListener = async () => {
+            await emitTo("main", "window_created", "from dashboard");
+            const unlisten = await listen<any>("targetfield", (event) => {
+                const ticker: string = (event.payload.args).toUpperCase();
+                if (ticker && !tickers.has(ticker)) {
+                    setTickers((prev) => new Set(prev).add(ticker));
+                    fetchChartData(ticker);
+                }
+            });
 
-            setChartState((prevState) => ({
-                ...prevState,
-                series: [
-                    {
-                        ...prevState.series[0],
-                        data: [...prevState.series[0].data, ...simulatedData],
-                    },
-                ],
-            }));
+            return () => {
+                unlisten();
+            };
         };
 
-        fetchData();
+        setupListener();
     }, []);
 
+    const fetchChartData = async (ticker: string) => {
+        try {
+            const response = await fetch(
+                `${serverURL}/stock-price/${ticker}?period=all`
+            );
+
+            if (!response.ok) {
+                if (response.status === 404) {
+                    setTickers((prev) => {
+                        const newTickers = new Set(prev);
+                        newTickers.delete(ticker);
+                        return newTickers;
+                    });
+                }
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            const data = await response.json();
+            const dataPoints = data.entries.map((entry: { date: string; open: number; high: number; low: number; close: number }) => [
+                new Date(entry.date).getTime(), entry.open, entry.high, entry.low, entry.close,
+            ]);
+
+            createChart(ticker, dataPoints);
+            fetchNewsData(ticker);
+        } catch (error) {
+            console.error("Error fetching data:", error);
+        }
+    };
+
+    const fetchNewsData = async (ticker: string) => {
+        try {
+            const response = await fetch(`${serverURL}/stock-news-polygon`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    symbol: ticker,
+                    order: "desc",
+                    limit: "5"
+                }),
+            });
+
+            if (response.ok) {
+                const news = await response.json();
+                setNewsData((prev) => new Map(prev).set(ticker, news.results));
+            } else {
+                console.error("Failed to fetch news data");
+            }
+        } catch (error) {
+            console.error("Error fetching news data:", error);
+        }
+    };
+
+    const createChart = (ticker: string, data: any) => {
+        const existingChart = charts.get(ticker);
+        if (existingChart) {
+            existingChart.series[0].setData(data);
+        } else {
+            const newChart = Highcharts.stockChart(`chart-${ticker}`, {
+                chart: { 
+                    backgroundColor: '#1a1a1a'
+                },
+                title: { 
+                    text: `${ticker} Stock Price`, 
+                    style: { color: '#e0e0e0' } 
+                },
+                xAxis: { 
+                    type: 'datetime', 
+                    labels: { style: { color: '#e0e0e0' } },
+                    title: { text: 'Date', style: { color: '#e0e0e0' } }
+                },
+                yAxis: { 
+                    title: { text: 'Price', style: { color: '#e0e0e0' } },
+                    labels: { style: { color: '#e0e0e0' } }
+                },
+                plotOptions: {
+                    candlestick: {
+                        color: '#ff4c4c',
+                        upColor: '#4caf50',
+                        lineColor: '#ff4c4c',
+                        upLineColor: '#4caf50',
+                        dataLabels: {
+                            color: '#ffffff'
+                        }
+                    }
+                },
+                series: [{
+                    type: 'candlestick',
+                    name: `${ticker} Stock Price`,
+                    data: data,
+                    tooltip: {
+                        valueDecimals: 3
+                    }
+                }],
+            });
+
+            setCharts((prev) => new Map(prev).set(ticker, newChart));
+        }
+    };
+
+    const handleClose = (ticker: string) => {
+        setTickers((prev) => {
+            const newTickers = new Set(prev);
+            newTickers.delete(ticker);
+            return newTickers;
+        });
+        setNewsData((prev) => {
+            const newNewsData = new Map(prev);
+            newNewsData.delete(ticker);
+            return newNewsData;
+        });
+    };
+
     return (
-        <div className="font-[family-name:var(--font-geist-sans)]">
-            <div id="chart">
-                <ReactApexChart
-                    options={chartState.options}
-                    series={chartState.series}
-                    type="candlestick"
-                    height={350}
-                />
-            </div>
+        <div>
+            {Array.from(tickers).map((ticker) => (
+                <div 
+                    key={ticker} 
+                    style={{ position: 'relative', display: 'flex', marginBottom: '20px' }}
+                    onMouseEnter={() => setHoveredTicker(ticker)} 
+                    onMouseLeave={() => setHoveredTicker(null)}
+                >
+                    <div>
+                        <div
+                            id={`chart-${ticker}`}
+                            style={{ height: "400px", width: "800px" }}
+                        ></div>
+                        {hoveredTicker === ticker && (
+                            <button 
+                                onClick={() => handleClose(ticker)} 
+                                style={{
+                                    position: 'absolute',
+                                    top: '0',
+                                    left: '15px',
+                                    backgroundColor: 'transparent',
+                                    border: 'none',
+                                    color: 'white',
+                                    fontSize: '30px',
+                                    opacity: 0.4,
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                ×
+                            </button>
+                        )}
+                    </div>
+                    <div style={{ height: '400px', overflowY: 'auto' }}>
+                        <h3 style={{ textAlign: 'center', fontSize: '20px', margin: '10px 0', fontWeight: 'bold' }}>Latest {ticker} News</h3>
+                        {newsData.get(ticker)?.slice(0, 5).map((news, index) => (
+                            <div key={news.id} style={{ border: '1px solid #ccc', margin: '0 0 10px 0', padding: '10px', backgroundColor: 'transparent', fontSize: '12px' }}>
+                                <h4><strong>{index + 1}. {news.title}</strong></h4>
+                                <p>{news.description}</p>
+                                <p><strong>Sentiment:</strong> {news.insights[0]?.sentiment || 'N/A'}</p>
+                                <p><strong>Reasoning:</strong> {news.insights[0]?.sentiment_reasoning || 'N/A'}</p>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            ))}
         </div>
     );
-}
+};
+
+export default Dashboard;
