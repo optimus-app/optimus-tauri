@@ -30,6 +30,7 @@
 }
 
 .news-container {
+    padding-left: 10px;
     height: 100%;
     overflow-y: auto;
 }
@@ -58,6 +59,32 @@ p {
     margin: 5px 0 0 0;
 }
 
+footer {
+    position: fixed;
+    bottom: 0;
+    background-color: #1a1a1a;
+    overflow-y: scroll;
+}
+
+table {
+    width: 100%;
+    font-size: small;
+}
+
+thead {
+    position: sticky;
+    top: 0;
+    background-color: #1a1a1a;
+}
+
+tr:nth-child(even) {
+    background-color: #2a2a2a;
+}
+
+td {
+    text-align: center;
+}
+
 .ticker-container {
     display: 'flex';
     flex-direction: 'row';
@@ -75,15 +102,24 @@ p {
     background-repeat: no-repeat;
     background-origin: content-box;
     box-sizing: border-box;
-    background-image: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2IDYiIHN0eWxlPSJiYWNrZ3JvdW5kLWNvbG9yOiNmZmZmZmYwMCIgeD0iMHB4IiB5PSIwcHgiIHdpZHRoPSI2cHgiIGhlaWdodD0iNnB4Ij48ZyBvcGFjaXR5PSIwLjMwMiI+PHBhdGggZD0iTSA2IDYgTCAwIDYgTCAwIDQuMiBMIDQgNC4yIEwgNC4yIDQuMiBMIDQuMiAwIEwgNiAwIEwgNiA2IEwgNiA2IFoiIGZpbGw9IiMwMDAwMDAiLz48L2c+PC9zdmc+');
-    background-color: white;
+    background-image: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IiNGRkZGRkYiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNNyA3bDkuMiA5LjJNMTcgN3YxMEg3Ii8+PC9zdmc+');
     opacity: 0.5;
-    background-position: bottom right;
-    padding: 0 3px 3px 0;
 }
 
 .react-resizable-handle-se {
     bottom: 0;
     right: 0;
     cursor: se-resize;
+    padding: 0 10px 10px 0;
+}
+
+.react-resizable-handle-n {
+    background-image: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IiNGRkZGRkYiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMTggMTVsLTYtNi02IDYiLz48L3N2Zz4=');
+    background-position: center top;
+    width: 18px;
+    height: 18px;
+    top: 0;
+    left: 50%;
+    cursor: n-resize;
+    background-color: #1a1a1a;
 }

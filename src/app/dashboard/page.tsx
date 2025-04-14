@@ -32,6 +32,7 @@ const Dashboard: React.FC = () => {
         };
 
         setupListener();
+        fetchWatchlist();
     }, []);
 
     const fetchChartData = async (ticker: string) => {
@@ -155,6 +156,46 @@ const Dashboard: React.FC = () => {
         }
     };
 
+    const toSciNotation = (num: number) => {
+        return (
+                num >= 1e12 ? (num / 1e12).toFixed(2) + 'T' :
+                (num >= 1e9 ? (num / 1e9).toFixed(2) + 'B' :
+                (num >= 1e6 ? (num / 1e6).toFixed(2) + 'M' :
+                (num >= 1e3 ? (num / 1e3).toFixed(2) + 'K' :
+                num.toFixed(2)
+            ))));
+    };
+
+    const fetchWatchlist = async () => {
+        const watchlistBody = document.getElementById("watchlist-body");
+        if (!watchlistBody) return;
+        watchlistBody.innerHTML = "";
+
+        try {
+            const response = await fetch(`${serverURL}/watchlist`);
+            if (response.ok) {
+                const watchlist = await response.json();
+                watchlist.forEach((item: any) => {
+                    const row = document.createElement("tr");
+                    row.innerHTML = `
+                        <td>${item.ticker}</td>
+                        <td>${item.last}</td>
+                        <td style="background-color: ${item.change >= 0 ? '#006401;' : '#8B0001;'}">${item.change}</td>
+                        <td style="background-color: ${item.change >= 0 ? '#006401;' : '#8B0001;'}">${(item.changePer * 100).toFixed(2)}%</td>
+                        <td>${toSciNotation(item.volume)}</td>
+                        <td>${toSciNotation(item.avgVolume)}</td>
+                        <td>${'$'+toSciNotation(item.marketCapacity)}</td>
+                    `;
+                    watchlistBody.appendChild(row);
+                });
+            } else {
+                console.error("Failed to fetch watchlist");
+            }
+        } catch (error) {
+            console.error("Error fetching watchlist:", error);
+        }
+    };          
+
     const handleClose = (ticker: string) => {
         setTickers((prev) => {
             const newTickers = new Set(prev);
@@ -173,7 +214,10 @@ const Dashboard: React.FC = () => {
     }
 
     return (
-        <div className="dashboard-container">
+        <div 
+            className="dashboard-container"
+            style={{ paddingBottom: document.getElementById('footer')?.clientHeight || 50 }}
+        >
             {Array.from(tickers).map((ticker) => {
                 const height = tickerDimensions.get(ticker)?.height || 400;
                 const widthChart = tickerDimensions.get(ticker)?.widthChart || 600;
@@ -242,6 +286,28 @@ const Dashboard: React.FC = () => {
                     </div>
                 );
             })}
+            <footer id="footer">
+            <ResizableBox
+                width={document.body.clientWidth}
+                height={50}
+                resizeHandles={["n"]}> 
+                    <table id="watchlist-table">
+                        <thead>
+                            <tr>
+                                <th>Ticker</th>
+                                <th>Last</th>
+                                <th>Change</th>
+                                <th>Change %</th>
+                                <th>Volume</th>
+                                <th>Avg Volume</th>
+                                <th>Market Cap</th>
+                            </tr>
+                        </thead>
+                        <tbody id="watchlist-body">
+                        </tbody>
+                    </table>
+            </ResizableBox>
+            </footer>
         </div>
     );
 };
