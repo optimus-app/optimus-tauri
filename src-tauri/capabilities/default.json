@@ -4,7 +4,10 @@
   "description": "enables the default permissions",
   "windows": [
     "main",
-    "im"
+    "im",
+    "dashboard",
+    "trade-exec",
+    "backtest"
   ],
   "permissions": [
     "core:default",
@@ -12,6 +15,10 @@
     {
       "identifier": "http:default",
       "allow": [{ "url": "http://localhost:8080/*" }]
+    },
+    {
+      "identifier": "http:default",
+      "allow": [{ "url": "http://localhost:8000/*" }]
     },
     "log:default"
   ]

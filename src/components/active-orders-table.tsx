@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Loader2 } from "lucide-react";
 
 interface Order {
     order_id: string;
@@ -27,27 +28,30 @@ interface Order {
     timestamp?: Date;
 }
 
-interface OrderHistoryTableProps {
+interface ActiveOrdersTableProps {
     orders: Order[];
     onCancelOrder: (orderId: string) => void;
 }
 
-export function OrderHistoryTable({
+export function ActiveOrdersTable({
     orders,
     onCancelOrder,
-}: OrderHistoryTableProps) {
+}: ActiveOrdersTableProps) {
     const getStatusBadge = (status: string) => {
         switch (status) {
-            case "FILLED":
             case "SUBMITTED":
                 return <Badge className="bg-green-500">Active</Badge>;
             case "SUBMITTING":
-                return <Badge className="bg-blue-500">Submitting</Badge>;
-            case "CANCELLED_ALL":
-            case "CANCELLED_PART":
-                return <Badge className="bg-amber-500">Cancelled</Badge>;
-            case "FAILED":
-                return <Badge className="bg-red-500">Failed</Badge>;
+                return (
+                    <Badge className="bg-blue-500 flex items-center gap-1">
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                        Submitting
+                    </Badge>
+                );
+            case "FILLED_PART":
+                return (
+                    <Badge className="bg-indigo-500">Partially Filled</Badge>
+                );
             default:
                 return <Badge>{status}</Badge>;
         }
@@ -60,19 +64,18 @@ export function OrderHistoryTable({
                     <TableRow>
                         <TableHead>Stock</TableHead>
                         <TableHead>Action</TableHead>
-                        <TableHead>Type</TableHead>
                         <TableHead>Quantity</TableHead>
                         <TableHead>Price</TableHead>
                         <TableHead>Status</TableHead>
-                        <TableHead>Created</TableHead>
+                        <TableHead>Time</TableHead>
                         <TableHead>Actions</TableHead>
                     </TableRow>
                 </TableHeader>
                 <TableBody>
                     {orders.length === 0 ? (
                         <TableRow>
-                            <TableCell colSpan={8} className="h-24 text-center">
-                                No orders found.
+                            <TableCell colSpan={7} className="h-24 text-center">
+                                No active orders. Place a trade to get started.
                             </TableCell>
                         </TableRow>
                     ) : (
@@ -93,35 +96,39 @@ export function OrderHistoryTable({
                                     </span>
                                 </TableCell>
                                 <TableCell>
-                                    {order.order_type || "Limit"}
+                                    {order.dealt_qty ? (
+                                        <span>
+                                            {order.dealt_qty} / {order.qty}
+                                        </span>
+                                    ) : (
+                                        order.qty
+                                    )}
                                 </TableCell>
-                                <TableCell>{order.qty}</TableCell>
                                 <TableCell>${order.price.toFixed(2)}</TableCell>
                                 <TableCell>
                                     {getStatusBadge(order.order_status)}
                                 </TableCell>
                                 <TableCell>
-                                    {order.create_time ||
-                                        (order.timestamp &&
-                                            new Date(
-                                                order.timestamp
-                                            ).toLocaleString())}
+                                    {order.create_time
+                                        ? new Date(
+                                              order.create_time
+                                          ).toLocaleTimeString()
+                                        : order.timestamp
+                                        ? new Date(
+                                              order.timestamp
+                                          ).toLocaleTimeString()
+                                        : "Just now"}
                                 </TableCell>
                                 <TableCell>
-                                    {order.order_status !== "CANCELLED_ALL" &&
-                                        order.order_status !== "FILLED" && (
-                                            <Button
-                                                variant="outline"
-                                                size="sm"
-                                                onClick={() =>
-                                                    onCancelOrder(
-                                                        order.order_id
-                                                    )
-                                                }
-                                            >
-                                                Cancel
-                                            </Button>
-                                        )}
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() =>
+                                            onCancelOrder(order.order_id)
+                                        }
+                                    >
+                                        Cancel
+                                    </Button>
                                 </TableCell>
                             </TableRow>
                         ))
