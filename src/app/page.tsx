@@ -68,8 +68,13 @@ export default function Home() {
                         {
                             label: "Functions",
                             items: [
-                                { value: "im", label: "Instant Messaging" },
                                 { value: "dashboard", label: "Dashboard" },
+                                { value: "im", label: "Instant Messaging" },
+                                {
+                                    value: "trade-exec",
+                                    label: "Trade Execution",
+                                },
+                                { value: "backtest", label: "Backtesting" },
                             ],
                         },
                     ]}

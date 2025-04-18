@@ -2,18 +2,49 @@ import WebSocket from "@tauri-apps/plugin-websocket";
 
 type MessageHandler = (message: string) => void;
 
-class WebSocketManager {
-    // This class uses Tauri's WebSocket and manually create a STOMP protocol system
-    // to subscribe to the messages of different channels
-    private static instance: WebSocketManager | null = null; // Singleton instance
-    private ws: any = null; //
-    private subscriptions: Map<string, MessageHandler> = new Map(); // Subscription map
-    private connected: boolean = false; // Connection state
-    private readonly SUBSCRIBE_FRAME: string =
-        "SUBSCRIBE\ndestination:{0}\nid:{1}\nack:auto\n\n\0";
-    private readonly url: string = "ws://localhost:8080/connect/chat";
+// Protocol types supported by the manager
+enum ProtocolType {
+    STOMP = "stomp",
+    RAW = "raw",
+}
 
-    private constructor() {}
+// Connection information for a WebSocket
+interface ConnectionInfo {
+    url: string;
+    protocol: ProtocolType;
+    ws: any;
+    connected: boolean;
+    subscriptions: Map<string, MessageHandler>;
+}
+
+class WebSocketManager {
+    // Singleton instance
+    private static instance: WebSocketManager | null = null;
+
+    // Map of connection IDs to connection info
+    private connections: Map<string, ConnectionInfo> = new Map();
+
+    // Default connection ID for backward compatibility with existing code
+    private readonly DEFAULT_CONNECTION_ID = "default-stomp-chat";
+
+    // STOMP protocol frames
+    private readonly STOMP_CONNECT_FRAME = "CONNECT\naccept-version:1.2\n\n\0";
+    private readonly STOMP_SUBSCRIBE_FRAME =
+        "SUBSCRIBE\ndestination:{0}\nid:{1}\nack:auto\n\n\0";
+
+    // Default STOMP URL for backward compatibility
+    private readonly DEFAULT_STOMP_URL = "ws://localhost:8080/connect/chat";
+
+    private constructor() {
+        // Initialize the default connection for backward compatibility
+        this.connections.set(this.DEFAULT_CONNECTION_ID, {
+            url: this.DEFAULT_STOMP_URL,
+            protocol: ProtocolType.STOMP,
+            ws: null,
+            connected: false,
+            subscriptions: new Map(),
+        });
+    }
 
     static getInstance(): WebSocketManager {
         if (!WebSocketManager.instance) {
@@ -22,16 +53,46 @@ class WebSocketManager {
         return WebSocketManager.instance;
     }
 
+    // For backward compatibility - adds subscription to default STOMP connection
     addSubscriptionPath(path: string, handler: MessageHandler): void {
-        this.subscriptions.set(path, handler);
+        const connection = this.connections.get(this.DEFAULT_CONNECTION_ID);
+        if (connection) {
+            connection.subscriptions.set(path, handler);
+        }
+    }
+
+    // Add a new WebSocket connection with specified protocol
+    addConnection(id: string, url: string, protocol: ProtocolType): void {
+        if (!this.connections.has(id)) {
+            this.connections.set(id, {
+                url,
+                protocol,
+                ws: null,
+                connected: false,
+                subscriptions: new Map(),
+            });
+        }
+    }
+
+    // Add subscription to a specific connection
+    addSubscriptionToConnection(
+        connectionId: string,
+        path: string,
+        handler: MessageHandler
+    ): void {
+        const connection = this.connections.get(connectionId);
+        if (connection) {
+            connection.subscriptions.set(path, handler);
+        } else {
+            console.error(`Connection ${connectionId} does not exist`);
+        }
     }
 
     private generateSubscriptionId(): string {
-        // Generates a random string, e.g., "sub-9348-167345"
         return `sub-${Math.floor(Math.random() * 10000)}-${Date.now()}`;
     }
 
-    private parseWebSocketPayload(payload: string): {
+    private parseStompPayload(payload: string): {
         destination: string;
         body: any;
     } {
@@ -50,87 +111,170 @@ class WebSocketManager {
         }
 
         const destination = headers["destination"];
+        let body = null;
 
-        console.log(rawDest);
-        console.log(rawBody);
-
-        const body = JSON.parse(rawBody.replace(/\0/g, ""));
+        try {
+            if (rawBody) {
+                body = JSON.parse(rawBody.replace(/\0/g, ""));
+            }
+        } catch (e) {
+            console.error("Failed to parse message body:", e);
+        }
 
         return { destination, body };
     }
 
-    // Start the WebSocket connection and handle subscriptions
-    async start(): Promise<void> {
-        if (this.connected) {
-            console.log("WebSocket is already connected");
+    // Start a specific connection
+    async startConnection(connectionId: string): Promise<void> {
+        const connection = this.connections.get(connectionId);
+
+        if (!connection) {
+            console.error(`Connection ${connectionId} does not exist`);
+            return;
+        }
+
+        if (connection.connected) {
+            console.log(`WebSocket ${connectionId} is already connected`);
             return;
         }
 
         try {
-            this.ws = await WebSocket.connect(this.url);
-            await this.ws
-                .send("CONNECT\naccept-version:1.2\n\n\0")
-                .then((r: any) => {
-                    console.log("Connection Established");
+            connection.ws = await WebSocket.connect(connection.url);
+
+            // Handle connection based on protocol
+            if (connection.protocol === ProtocolType.STOMP) {
+                // STOMP protocol connection
+                await connection.ws.send(this.STOMP_CONNECT_FRAME);
+                console.log(`STOMP Connection ${connectionId} established`);
+
+                // Set up listener for STOMP messages
+                connection.ws.addListener((message: any) => {
+                    this.handleStompMessage(connectionId, message.data);
                 });
-            this.connected = true;
-            console.log("Connected to WebSocket");
 
-            // Set up the WebSocket message listener
-            this.ws.addListener((message: any) => {
-                this.handleMessage(message.data);
-            });
+                // Subscribe to all STOMP paths
+                for (const [
+                    path,
+                    handler,
+                ] of connection.subscriptions.entries()) {
+                    const subscriptionPath = this.STOMP_SUBSCRIBE_FRAME.replace(
+                        /\{0\}/g,
+                        path
+                    ).replace(/\{1\}/g, this.generateSubscriptionId());
 
-            // Subscribe to all paths
-            for (const [key, handler] of this.subscriptions.entries()) {
-                const subscriptionPath = this.SUBSCRIBE_FRAME.replace(
-                    /\{0\}/g,
-                    key
-                ).replace(/\{1\}/g, this.generateSubscriptionId());
-                console.log(subscriptionPath);
-                await this.ws.send(subscriptionPath);
-                console.log(`Subscribed to ${key}`);
+                    await connection.ws.send(subscriptionPath);
+                    console.log(
+                        `Subscribed to ${path} on connection ${connectionId}`
+                    );
+                }
+            } else {
+                // Raw WebSocket connection
+                console.log(
+                    `Raw WebSocket Connection ${connectionId} established`
+                );
+
+                // Set up listener for raw messages
+                connection.ws.addListener((message: any) => {
+                    this.handleRawMessage(connectionId, message.data);
+                });
             }
+
+            connection.connected = true;
+            this.connections.set(connectionId, connection);
         } catch (error) {
-            console.error("Failed to connect to WebSocket:", error);
+            console.error(
+                `Failed to connect WebSocket ${connectionId}:`,
+                error
+            );
         }
     }
 
-    // Handle incoming WebSocket messages
-    private handleMessage(message: any): void {
-        console.log("Received message:", message);
-        /*
-        MESSAGE
-        destination:/subscribe/chat/messages/user1
-        content-type:application/json
-        subscription:user1
-        message-id:e5a8c7d9-2aed-9272-3fd4-352e7d3254e9-3
-        content-length:50
+    // Start the default connection (for backward compatibility)
+    async start(): Promise<void> {
+        await this.startConnection(this.DEFAULT_CONNECTION_ID);
+    }
 
-        {"content":"hi","roomId":1,"sender":"user1"}
-        */
-        const { destination, body } = this.parseWebSocketPayload(message);
+    // Start all configured connections
+    async startAll(): Promise<void> {
+        for (const connectionId of this.connections.keys()) {
+            await this.startConnection(connectionId);
+        }
+    }
 
-        if (destination == "" && body == "null") {
+    // Handle STOMP WebSocket messages
+    private handleStompMessage(connectionId: string, message: any): void {
+        console.log(`Received STOMP message on ${connectionId}:`, message);
+
+        const { destination, body } = this.parseStompPayload(message);
+
+        if (destination === "" && body === null) {
             return;
         }
-        console.log(`Destination: ${destination}`);
-        const handler = this.subscriptions.get(destination);
 
+        const connection = this.connections.get(connectionId);
+        if (!connection) return;
+
+        const handler = connection.subscriptions.get(destination);
         if (handler) {
-            handler(body);
+            handler(JSON.stringify(body));
         } else {
-            console.warn(`No handler for destination: ${destination}`);
+            console.warn(
+                `No handler for destination: ${destination} on connection ${connectionId}`
+            );
         }
     }
 
-    // Disconnect the WebSocket
+    // Handle Raw WebSocket messages
+    private handleRawMessage(connectionId: string, message: any): void {
+        console.log(`Received Raw message on ${connectionId}:`, message);
+
+        const connection = this.connections.get(connectionId);
+        if (!connection) return;
+
+        // For raw connections, we dispatch the message to all handlers
+        // Each handler can parse the message as needed
+        for (const [path, handler] of connection.subscriptions.entries()) {
+            handler(message);
+        }
+    }
+
+    // Send a message on a specific connection
+    async sendMessage(connectionId: string, message: string): Promise<void> {
+        const connection = this.connections.get(connectionId);
+        if (!connection || !connection.connected || !connection.ws) {
+            console.error(
+                `Cannot send message: connection ${connectionId} is not ready`
+            );
+            return;
+        }
+
+        await connection.ws.send(message);
+    }
+
+    // Disconnect a specific connection
+    async disconnectConnection(connectionId: string): Promise<void> {
+        const connection = this.connections.get(connectionId);
+        if (connection && connection.ws) {
+            await connection.ws.disconnect();
+            connection.connected = false;
+            connection.ws = null;
+            this.connections.set(connectionId, connection);
+            console.log(`Disconnected WebSocket ${connectionId}`);
+        }
+    }
+
+    // Disconnect the default connection (for backward compatibility)
     async disconnect(): Promise<void> {
-        if (this.ws) {
-            await this.ws.disconnect();
-            console.log("Disconnected from WebSocket");
+        await this.disconnectConnection(this.DEFAULT_CONNECTION_ID);
+    }
+
+    // Disconnect all connections
+    async disconnectAll(): Promise<void> {
+        for (const connectionId of this.connections.keys()) {
+            await this.disconnectConnection(connectionId);
         }
     }
 }
 
+export { WebSocketManager, ProtocolType };
 export default WebSocketManager;

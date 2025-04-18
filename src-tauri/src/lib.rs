@@ -12,6 +12,14 @@ lazy_static! {
             "dashboard".to_string(),
             "http://localhost:3000/dashboard".to_string(),
         );
+        m.insert(
+            "trade-exec".to_string(),
+            "http://localhost:3000/orders".to_string(),
+        );
+        m.insert(
+            "backtest".to_string(),
+            "http://localhost:3000/backtest".to_string(),
+        );
         m
     };
 }
@@ -42,7 +50,7 @@ async fn create_window(
             .build()
             .unwrap();
 
-        // window.open_devtools();
+        window.open_devtools();
         state.window_id += 1;
         window
     };
