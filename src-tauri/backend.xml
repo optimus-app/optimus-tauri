@@ -1,0 +1,372 @@
+This file is a merged representation of the backend of a big codebase, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of the entire repository's contents.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+<additional_info>
+
+</additional_info>
+
+</file_summary>
+
+<directory_structure>
+capabilities/
+  default.json
+  desktop.json
+src/
+  lib.rs
+  main.rs
+.gitignore
+build.rs
+Cargo.toml
+tauri.conf.json
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path="capabilities/default.json">
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "enables the default permissions",
+  "windows": [
+    "main",
+    "im",
+    "dashboard",
+    "trade-exec",
+    "backtest"
+  ],
+  "permissions": [
+    "core:default",
+    "websocket:default",
+    {
+      "identifier": "http:default",
+      "allow": [{ "url": "http://localhost:8080/*" }]
+    },
+    {
+      "identifier": "http:default",
+      "allow": [{ "url": "http://localhost:8000/*" }]
+    },
+    {
+      "identifier": "http:default",
+      "allow": [{ "url": "http://0.0.0.0:8000/*" }]
+    },
+    "log:default"
+  ]
+}
+</file>
+
+<file path="capabilities/desktop.json">
+{
+  "identifier": "desktop-capability",
+  "platforms": [
+    "macOS",
+    "windows",
+    "linux"
+  ],
+  "windows": [
+    "main",
+    "im",
+    "dashboard",
+    "trade-exec",
+    "backtest"
+  ],
+  "permissions": [
+    "global-shortcut:default",
+    "global-shortcut:default"
+  ]
+}
+</file>
+
+<file path="src/lib.rs">
+use lazy_static::lazy_static;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use tauri::{Emitter, EventTarget, Listener, Manager};
+
+lazy_static! {
+    static ref window_names: HashMap<String, String> = {
+        let mut m = HashMap::new();
+        m.insert("im".to_string(), "http://localhost:3000/im".to_string());
+        m.insert(
+            "dashboard".to_string(),
+            "http://localhost:3000/dashboard".to_string(),
+        );
+        m.insert(
+            "trade-exec".to_string(),
+            "http://localhost:3000/orders".to_string(),
+        );
+        m.insert(
+            "backtest".to_string(),
+            "http://localhost:3000/backtest".to_string(),
+        );
+        m
+    };
+}
+
+#[tauri::command]
+async fn create_window(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Mutex<AppState>>,
+    name: String,
+) -> Result<(), String> {
+    println!("Creating window: {}", name);
+    let new_name = name.clone();
+    let window_id = format!("{}", new_name);
+    let _ = if let Some(existing_window) = app.get_webview_window(&name) {
+        existing_window.set_focus().unwrap();
+        let _ = app.emit_to(EventTarget::webview_window("im"), "window_created", ());
+        existing_window
+    } else {
+        let mut state = state.lock().unwrap();
+        println!("New window id: {}", window_id);
+
+        let path: PathBuf = Path::new(window_names.get(&new_name).unwrap()).into();
+        let webview_url = tauri::WebviewUrl::App(path);
+
+        let window = tauri::WebviewWindowBuilder::new(&app, &window_id, webview_url.clone())
+            .title(&name)
+            .inner_size(1200.00, 800.00)
+            .build()
+            .unwrap();
+
+        window.open_devtools();
+        state.window_id += 1;
+        window
+    };
+    println!("Window creation completed for: {}", name);
+    let _ = app.emit_to(EventTarget::webview_window("im"), "cmd_request", ());
+    Ok(())
+}
+
+#[tauri::command]
+async fn command_handling(
+    app: tauri::AppHandle,
+    args: String,
+    command: String,
+) -> Result<(), String> {
+    // Check if args is empty
+    println!("Command: {}", command);
+    println!("Args: {}", args);
+    if args.is_empty() {
+        Ok(())
+    } else {
+        match command.as_str() {
+            "im" => {
+                let _ = app.emit_to(
+                    EventTarget::webview_window("im"),
+                    "target_field",
+                    args.clone(),
+                );
+            }
+            _ => {
+                println!("Command not found: {}", command);
+            }
+        }
+        Ok(())
+    }
+}
+
+// async fn command_name(state: tauri::State<'_, MyState>) -> Result<(), String> {
+//   *state.s.lock().unwrap() = "new string".into();
+//   state.t.lock().unwrap().insert("key".into(), "value".into());
+//   Ok(())
+// }
+
+// #[derive(Default)]
+// struct MyState {
+//   s: std::sync::Mutex<String>,
+//   t: std::sync::Mutex<std::collections::HashMap<String, String>>,
+// }
+// remember to call `.manage(MyState::default())`
+
+#[derive(Default)]
+struct AppState {
+    window_id: u8,
+}
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    tauri::Builder::default()
+        .plugin(tauri_plugin_http::init())
+        .plugin(tauri_plugin_websocket::init())
+        .plugin(tauri_plugin_log::Builder::new().build())
+        .setup(|app| {
+            #[cfg(desktop)]
+            {
+                app.listen_any("test", |event| {
+                    println!("Recived event: {:?}", event.payload());
+                });
+
+                use tauri_plugin_global_shortcut::{
+                    Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState,
+                };
+
+                let ctrl_n_shortcut = Shortcut::new(Some(Modifiers::CONTROL), Code::KeyN);
+                app.handle().plugin(
+                    tauri_plugin_global_shortcut::Builder::new()
+                        .with_handler(move |app, shortcut, event| {
+                            println!("{:?}", shortcut);
+                            if shortcut == &ctrl_n_shortcut {
+                                match event.state() {
+                                    ShortcutState::Pressed => {
+                                        println!("Ctrl-N Pressed!");
+                                    }
+                                    ShortcutState::Released => {
+                                        app.get_webview_window("main")
+                                            .unwrap()
+                                            .set_focus()
+                                            .unwrap();
+                                    }
+                                }
+                            }
+                        })
+                        .build(),
+                )?;
+
+                app.global_shortcut().register(ctrl_n_shortcut)?;
+            }
+            app.manage(Mutex::new(AppState::default()));
+            #[cfg(debug_assertions)]
+            // app.get_webview_window("main").unwrap().open_devtools();
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![create_window, command_handling])
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
+}
+</file>
+
+<file path="src/main.rs">
+// Prevents additional console window on Windows in release, DO NOT REMOVE!!
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
+fn main() {
+    app_lib::run();
+}
+</file>
+
+<file path=".gitignore">
+# Generated by Cargo
+# will have compiled files and executables
+/target/
+/gen/schemas
+</file>
+
+<file path="build.rs">
+fn main() {
+    tauri_build::build()
+}
+</file>
+
+<file path="Cargo.toml">
+[package]
+name = "app"
+version = "0.1.0"
+description = "A Tauri App"
+authors = ["you"]
+license = ""
+repository = ""
+edition = "2021"
+rust-version = "1.77.2"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+name = "app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.0.4", features = [] }
+
+[dependencies]
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+log = "0.4"
+lazy_static = { version = "1.5.0" }
+tauri = { version = "2.2.3", features = ["unstable"] }
+tauri-plugin-websocket = "2"
+tauri-plugin-http = "2"
+tauri-plugin-log = "2"
+
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-global-shortcut = "2"
+</file>
+
+<file path="tauri.conf.json">
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "optimus-tarui",
+  "version": "0.1.0",
+  "identifier": "com.optimus",
+  "build": {
+    "frontendDist": "../out",
+    "devUrl": "http://localhost:3000",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "optimus-tarui",
+        "width": 600,
+        "height": 300,
+        "resizable": true,
+        "fullscreen": false,
+        "theme": "Dark"
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  }
+}
+</file>
+
+</files>

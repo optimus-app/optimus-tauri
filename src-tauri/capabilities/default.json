@@ -24,6 +24,18 @@
       "identifier": "http:default",
       "allow": [{ "url": "http://0.0.0.0:8000/*" }]
     },
+    {
+      "identifier": "http:default",
+      "allow": [{ "url": "http://127.0.0.1:8000/*" }]
+    },
+    {
+      "identifier": "http:default",
+      "allow": [{ "url": "http://127.0.0.0:3000/*" }]
+    },
+    {
+      "identifier": "http:default",
+      "allow": [{ "url": "http://0.0.0.0:9000/*" }]
+    },
     "log:default"
   ]
 }

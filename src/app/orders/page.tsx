@@ -124,7 +124,7 @@ export default function OrderEntryPage() {
 
     useEffect(() => {
         // Configure HTTP manager for the order server
-        httpManager.addServer("orders-server", "http://localhost:8000/");
+        httpManager.addServer("orders-server", "http://0.0.0.0:9000/");
 
         // Rest of your initialization code
     }, [httpManager]);
@@ -172,6 +172,7 @@ export default function OrderEntryPage() {
             );
 
             if (response && response.orders) {
+                console.log("Response received");
                 // Split orders into active and historical based on status
                 const active: Order[] = [];
                 const historical: Order[] = [];
@@ -205,7 +206,7 @@ export default function OrderEntryPage() {
                 // Add a new connection for orders
                 wsManager.addConnection(
                     ORDERS_WS_CONNECTION_ID,
-                    "ws://localhost:8000/api/v1/ws/orders",
+                    "ws://localhost:9000/api/v1/ws/orders",
                     ProtocolType.RAW
                 );
 

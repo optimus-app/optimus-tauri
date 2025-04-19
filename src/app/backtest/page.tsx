@@ -34,8 +34,6 @@ import {
 import { Calendar } from "@/components/ui/calendar";
 import { useToast } from "@/hooks/use-toast";
 
-// Import Highcharts
-
 import Highcharts from "highcharts";
 import HighchartsReact from "highcharts-react-official";
 import HighchartsMore from "highcharts/highcharts-more";
@@ -58,7 +56,6 @@ const algorithms = [
     },
 ];
 
-// Metrics configuration
 const metricsConfig = [
     {
         key: "netPerformance",
@@ -196,8 +193,7 @@ export default function BacktestingPage() {
     const httpManager = useMemo(() => HTTPRequestManager.getInstance(), []);
 
     useEffect(() => {
-        // Configure HTTP manager for the backtest server
-        httpManager.addServer("backtest-server", "http://0.0.0.0:8000/");
+        httpManager.addServer("backtest-server", "http://0.0.0.0:9000/");
 
         return () => {
             if (intervalRef.current) clearInterval(intervalRef.current);
