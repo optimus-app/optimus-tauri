@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, RefObject } from "react";
 import HTTPRequestManager, { Methods } from "@/app/utils/HTTPRequestManager";
 import { useMemo } from "react";
 import { useTheme } from "next-themes";
@@ -39,7 +39,53 @@ import {
     ColorType,
     CrosshairMode,
     LineStyle,
+    IChartApi,
+    DeepPartial,
+    ChartOptions,
+    SeriesMarker,
+    Time,
+    MouseEventParams,
+    ISeriesApi,
+    LineData,
 } from "lightweight-charts";
+
+// Define interfaces for strongly typed components
+interface ChartLegendItem {
+    color: string;
+    label: string;
+}
+
+interface DataPoint {
+    time: number | Date;
+    date?: Date;
+    value: number;
+    price?: number;
+    shortSma?: number;
+    longSma?: number;
+    performance?: number;
+    buyPrice?: number;
+    sellPrice?: number;
+    drawdown?: number;
+    [key: string]: any;
+}
+
+interface SimulationGraphProps {
+    data: DataPoint[];
+    valueKey?: string;
+    chartType?: "portfolio" | "drawdown" | "volatility";
+    parameters?: {
+        shortWindow?: number;
+        longWindow?: number;
+        [key: string]: any;
+    };
+}
+
+interface MetricsDisplayProps {
+    metrics: Record<string, { value: number }>;
+    chartsData: Record<string, DataPoint[]>;
+    selectedCharts: string[];
+    setSelectedCharts: (charts: string[]) => void;
+}
 
 // Mock algorithms
 const algorithms = [
@@ -159,7 +205,7 @@ const metricsConfig = [
 ];
 
 // Chart Legend Component
-const ChartLegend = ({ items }) => {
+const ChartLegend = ({ items }: { items: ChartLegendItem[] }) => {
     if (!items || items.length === 0) return null;
 
     return (
@@ -183,11 +229,11 @@ const SimulationGraph = ({
     valueKey = "value",
     chartType = "portfolio",
     parameters = {},
-}) => {
-    const chartContainerRef = useRef(null);
-    const chartRef = useRef(null);
-    const tooltipRef = useRef(null);
-    const legendRef = useRef([]);
+}: SimulationGraphProps) => {
+    const chartContainerRef = useRef<HTMLDivElement>(null);
+    const chartRef = useRef<IChartApi | null>(null);
+    const tooltipRef = useRef<HTMLDivElement | null>(null);
+    const legendRef = useRef<ChartLegendItem[]>([]);
     const { theme } = useTheme();
 
     useEffect(() => {
@@ -201,10 +247,11 @@ const SimulationGraph = ({
 
         // Create tooltip element if not exists
         if (!tooltipRef.current) {
-            tooltipRef.current = document.createElement("div");
-            tooltipRef.current.className =
+            const tooltipElement = document.createElement("div");
+            tooltipElement.className =
                 "absolute z-50 hidden p-2 text-xs rounded shadow bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700";
-            document.body.appendChild(tooltipRef.current);
+            document.body.appendChild(tooltipElement);
+            tooltipRef.current = tooltipElement;
         }
 
         const isDarkTheme = theme === "dark";
@@ -272,12 +319,12 @@ const SimulationGraph = ({
         legendRef.current = [];
 
         // Format data for the main series based on chart type
-        const formattedData = data.map((point) => ({
+        const formattedData = data.map((point: DataPoint) => ({
             time:
                 typeof point.time === "number"
                     ? new Date(point.time).toISOString().split("T")[0]
-                    : point.time.toISOString().split("T")[0],
-            value: point[valueKey],
+                    : (point.time as Date).toISOString().split("T")[0],
+            value: point[valueKey] as number,
         }));
 
         // Create main series
@@ -324,11 +371,11 @@ const SimulationGraph = ({
                     priceScaleId: "right",
                 });
 
-                const priceData = data.map((point) => ({
+                const priceData = data.map((point: DataPoint) => ({
                     time:
                         typeof point.time === "number"
                             ? new Date(point.time).toISOString().split("T")[0]
-                            : point.time.toISOString().split("T")[0],
+                            : (point.time as Date).toISOString().split("T")[0],
                     value: point.price,
                 }));
 
@@ -346,20 +393,22 @@ const SimulationGraph = ({
                         priceScaleId: "right",
                     });
 
-                    const shortSmaData = data.map((point) => ({
+                    const shortSmaData = data.map((point: DataPoint) => ({
                         time:
                             typeof point.time === "number"
                                 ? new Date(point.time)
                                       .toISOString()
                                       .split("T")[0]
-                                : point.time.toISOString().split("T")[0],
+                                : (point.time as Date)
+                                      .toISOString()
+                                      .split("T")[0],
                         value: point.shortSma,
                     }));
 
                     shortSMA.setData(shortSmaData);
                     legendRef.current.push({
                         color: colors.shortSma,
-                        label: `Short SMA (${parameters.shortWindow})`,
+                        label: `Short SMA (${parameters.shortWindow || "?"})`,
                     });
                 }
 
@@ -370,29 +419,31 @@ const SimulationGraph = ({
                         priceScaleId: "right",
                     });
 
-                    const longSmaData = data.map((point) => ({
+                    const longSmaData = data.map((point: DataPoint) => ({
                         time:
                             typeof point.time === "number"
                                 ? new Date(point.time)
                                       .toISOString()
                                       .split("T")[0]
-                                : point.time.toISOString().split("T")[0],
+                                : (point.time as Date)
+                                      .toISOString()
+                                      .split("T")[0],
                         value: point.longSma,
                     }));
 
                     longSMA.setData(longSmaData);
                     legendRef.current.push({
                         color: colors.longSma,
-                        label: `Long SMA (${parameters.longWindow})`,
+                        label: `Long SMA (${parameters.longWindow || "?"})`,
                     });
                 }
 
                 // Add buy/sell markers
-                const markers = [];
+                const markers: SeriesMarker<Time>[] = [];
                 let hasBuy = false;
                 let hasSell = false;
 
-                data.forEach((point) => {
+                data.forEach((point: DataPoint) => {
                     if (point.buyPrice) {
                         hasBuy = true;
                         markers.push({
@@ -401,7 +452,9 @@ const SimulationGraph = ({
                                     ? new Date(point.time)
                                           .toISOString()
                                           .split("T")[0]
-                                    : point.time.toISOString().split("T")[0],
+                                    : (point.time as Date)
+                                          .toISOString()
+                                          .split("T")[0],
                             position: "belowBar",
                             color: colors.buy,
                             shape: "arrowUp",
@@ -417,7 +470,9 @@ const SimulationGraph = ({
                                     ? new Date(point.time)
                                           .toISOString()
                                           .split("T")[0]
-                                    : point.time.toISOString().split("T")[0],
+                                    : (point.time as Date)
+                                          .toISOString()
+                                          .split("T")[0],
                             position: "aboveBar",
                             color: colors.sell,
                             shape: "arrowDown",
@@ -443,7 +498,7 @@ const SimulationGraph = ({
         }
 
         // Custom tooltip handler
-        chart.subscribeCrosshairMove((param) => {
+        chart.subscribeCrosshairMove((param: MouseEventParams) => {
             if (!tooltipRef.current) return;
 
             // Hide tooltip when out of bounds
@@ -451,9 +506,11 @@ const SimulationGraph = ({
                 param.point === undefined ||
                 !param.time ||
                 param.point.x < 0 ||
-                param.point.x > chartContainerRef.current.clientWidth ||
+                (chartContainerRef.current &&
+                    param.point.x > chartContainerRef.current.clientWidth) ||
                 param.point.y < 0 ||
-                param.point.y > chartContainerRef.current.clientHeight
+                (chartContainerRef.current &&
+                    param.point.y > chartContainerRef.current.clientHeight)
             ) {
                 tooltipRef.current.style.display = "none";
                 return;
@@ -463,11 +520,11 @@ const SimulationGraph = ({
             const dateStr = param.time;
 
             // Find the corresponding data point
-            const dataPoint = data.find((point) => {
+            const dataPoint = data.find((point: DataPoint) => {
                 const pointDate =
                     typeof point.time === "number"
                         ? new Date(point.time).toISOString().split("T")[0]
-                        : point.time.toISOString().split("T")[0];
+                        : (point.time as Date).toISOString().split("T")[0];
                 return pointDate === dateStr;
             });
 
@@ -478,14 +535,14 @@ const SimulationGraph = ({
 
             // Build tooltip content
             let content = `<div class="font-medium mb-1">${new Date(
-                dataPoint.time
+                dataPoint.time instanceof Date ? dataPoint.time : dataPoint.time
             ).toLocaleDateString()}</div>`;
 
             // Add data based on chart type
             if (chartType === "portfolio") {
-                content += `<div>Portfolio: $${dataPoint[valueKey].toFixed(
-                    2
-                )}</div>`;
+                content += `<div>Portfolio: $${(
+                    dataPoint[valueKey] as number
+                ).toFixed(2)}</div>`;
 
                 if (dataPoint.price !== undefined) {
                     content += `<div>Price: $${dataPoint.price.toFixed(
@@ -518,40 +575,50 @@ const SimulationGraph = ({
                 }
             } else if (chartType === "drawdown") {
                 content += `<div>Drawdown: ${(
-                    dataPoint[valueKey] * 100
+                    (dataPoint[valueKey] as number) * 100
                 ).toFixed(2)}%</div>`;
             } else if (chartType === "volatility") {
                 content += `<div>Volatility: ${(
-                    dataPoint[valueKey] * 100
+                    (dataPoint[valueKey] as number) * 100
                 ).toFixed(2)}%</div>`;
             }
 
-            tooltipRef.current.innerHTML = content;
-            tooltipRef.current.style.display = "block";
+            if (tooltipRef.current) {
+                tooltipRef.current.innerHTML = content;
+                tooltipRef.current.style.display = "block";
+            }
 
             // Position tooltip
-            const offset = 15;
-            let left = param.point.x + offset;
-            const tooltipWidth = 150;
+            if (chartContainerRef.current && tooltipRef.current) {
+                const offset = 15;
+                let left = param.point.x + offset;
+                const tooltipWidth = 150;
 
-            if (left > chartContainerRef.current.clientWidth - tooltipWidth) {
-                left = param.point.x - tooltipWidth - offset;
+                if (
+                    left >
+                    chartContainerRef.current.clientWidth - tooltipWidth
+                ) {
+                    left = param.point.x - tooltipWidth - offset;
+                }
+
+                let top = param.point.y + offset;
+                const tooltipHeight = 120;
+
+                if (
+                    top >
+                    chartContainerRef.current.clientHeight - tooltipHeight
+                ) {
+                    top = param.point.y - tooltipHeight - offset;
+                }
+
+                const rect = chartContainerRef.current.getBoundingClientRect();
+                tooltipRef.current.style.left = `${
+                    left + rect.left + window.scrollX
+                }px`;
+                tooltipRef.current.style.top = `${
+                    top + rect.top + window.scrollY
+                }px`;
             }
-
-            let top = param.point.y + offset;
-            const tooltipHeight = 120;
-
-            if (top > chartContainerRef.current.clientHeight - tooltipHeight) {
-                top = param.point.y - tooltipHeight - offset;
-            }
-
-            const rect = chartContainerRef.current.getBoundingClientRect();
-            tooltipRef.current.style.left = `${
-                left + rect.left + window.scrollX
-            }px`;
-            tooltipRef.current.style.top = `${
-                top + rect.top + window.scrollY
-            }px`;
         });
 
         // Fit content to view all data
@@ -559,8 +626,8 @@ const SimulationGraph = ({
 
         // Handle resize
         const handleResize = () => {
-            if (chartContainerRef.current && chart) {
-                chart.applyOptions({
+            if (chartContainerRef.current && chartRef.current) {
+                chartRef.current.applyOptions({
                     width: chartContainerRef.current.clientWidth,
                 });
             }
@@ -583,10 +650,12 @@ const SimulationGraph = ({
             removeTradingViewLogo();
         });
 
-        observer.observe(chartContainerRef.current, {
-            childList: true,
-            subtree: true,
-        });
+        if (chartContainerRef.current) {
+            observer.observe(chartContainerRef.current, {
+                childList: true,
+                subtree: true,
+            });
+        }
 
         return () => {
             window.removeEventListener("resize", handleResize);
@@ -595,7 +664,9 @@ const SimulationGraph = ({
                 document.body.removeChild(tooltipRef.current);
                 tooltipRef.current = null;
             }
-            chart.remove();
+            if (chartRef.current) {
+                chartRef.current.remove();
+            }
         };
     }, [data, valueKey, chartType, theme, parameters]);
 
@@ -622,7 +693,7 @@ export default function BacktestingPage() {
 
     // State
     const [selectedAlgorithm] = useState(algorithms[0].name);
-    const [parameters, setParameters] = useState(
+    const [parameters, setParameters] = useState<Record<string, number>>(
         Object.fromEntries(
             algorithms[0].parameters.map((p) => [p.name, p.default])
         )
@@ -634,9 +705,14 @@ export default function BacktestingPage() {
     const [endDate, setEndDate] = useState<Date | undefined>(
         new Date("2023-01-01")
     );
-    const [simulationData, setSimulationData] = useState<any[]>([]);
-    const [metrics, setMetrics] = useState<any>(null);
-    const [chartsData, setChartsData] = useState<any>({});
+    const [simulationData, setSimulationData] = useState<DataPoint[]>([]);
+    const [metrics, setMetrics] = useState<Record<
+        string,
+        { value: number }
+    > | null>(null);
+    const [chartsData, setChartsData] = useState<Record<string, DataPoint[]>>(
+        {}
+    );
     const [selectedCharts, setSelectedCharts] = useState<string[]>([]);
     const [isRunning, setIsRunning] = useState(false);
     const [activeTab, setActiveTab] = useState("chart");
@@ -775,7 +851,7 @@ export default function BacktestingPage() {
 
         // Create chart data for various metrics
         const drawdownData = formattedData.map(
-            (point: any, i: number, arr: any[]) => {
+            (point: DataPoint, i: number, arr: DataPoint[]) => {
                 const maxValue = Math.max(
                     ...arr.slice(0, i + 1).map((p) => p.value)
                 );
@@ -791,7 +867,7 @@ export default function BacktestingPage() {
 
         const volatilityData = formattedData
             .slice(1)
-            .map((point: any, i: number) => {
+            .map((point: DataPoint, i: number) => {
                 const prevValue = formattedData[i].value;
                 const returnVal = (point.value - prevValue) / prevValue;
                 return {
@@ -912,12 +988,7 @@ export default function BacktestingPage() {
         chartsData,
         selectedCharts,
         setSelectedCharts,
-    }: {
-        metrics: any;
-        chartsData: any;
-        selectedCharts: string[];
-        setSelectedCharts: (charts: string[]) => void;
-    }) => {
+    }: MetricsDisplayProps) => {
         if (!metrics) {
             return (
                 <div className="text-center text-muted-foreground">
@@ -1024,7 +1095,11 @@ export default function BacktestingPage() {
     };
 
     // AI Insights component
-    const AIInsights = ({ metrics }: { metrics: any }) => {
+    const AIInsights = ({
+        metrics,
+    }: {
+        metrics: Record<string, { value: number }> | null;
+    }) => {
         if (!metrics) {
             return (
                 <div className="text-center text-muted-foreground">

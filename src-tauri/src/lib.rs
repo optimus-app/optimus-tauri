@@ -20,6 +20,10 @@ lazy_static! {
             "backtest".to_string(),
             "http://localhost:3000/backtest".to_string(),
         );
+        m.insert(
+            "ml".to_string(),
+            "http://localhost:3000/ml-charts".to_string(),
+        );
         m
     };
 }
