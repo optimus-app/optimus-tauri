@@ -6,6 +6,7 @@ jobs:
     create-release:
         permissions:
             contents: write
+            pull-requests: write
         runs-on: ubuntu-22.04
         outputs:
             release_id: ${{ steps.create-release.outputs.result }}
@@ -41,21 +42,102 @@ jobs:
                   NEW_VERSION="$MAJOR.$MINOR.$NEW_PATCH"
                   echo "New version: $NEW_VERSION"
 
-                  # Update package.json with new version
-                  npm version $NEW_VERSION --no-git-tag-version
-
                   # Set up git user
                   git config --global user.name "GitHub Actions"
                   git config --global user.email "actions@github.com"
 
-                  # Commit and push changes
+                  # Create a new branch for the version bump
+                  git checkout -b version-bump-$NEW_VERSION
+
+                  # Update package.json with new version
+                  npm version $NEW_VERSION --no-git-tag-version
+
+                  # Commit changes to the new branch
                   git add package.json
-                  git commit -m "Bump version to $NEW_VERSION [skip ci]"
-                  git push
+                  git commit -m "Bump version to $NEW_VERSION"
+                  git push -u origin version-bump-$NEW_VERSION
 
                   # Output the new version for later steps
                   echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
                   echo "NEW_VERSION=$NEW_VERSION" >> $GITHUB_ENV
+                  echo "BRANCH_NAME=version-bump-$NEW_VERSION" >> $GITHUB_ENV
+
+            - name: Create pull request
+              id: create-pr
+              uses: actions/github-script@v6
+              with:
+                  script: |
+                      const { data } = await github.rest.pulls.create({
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        title: `Bump version to ${process.env.NEW_VERSION}`,
+                        body: 'Automated version bump for new release',
+                        head: `version-bump-${process.env.NEW_VERSION}`,
+                        base: 'main',
+                        draft: false
+                      });
+
+                      // Store PR number for later
+                      console.log(`Created PR #${data.number}`);
+                      return data.number;
+                  result-encoding: string
+
+            - name: Enable auto-merge for pull request
+              uses: actions/github-script@v6
+              with:
+                  script: |
+                      try {
+                        // Try to enable auto-merge
+                        await github.rest.pulls.updateBranch({
+                          owner: context.repo.owner,
+                          repo: context.repo.repo,
+                          pull_number: ${{ steps.create-pr.outputs.result }}
+                        });
+                        
+                        console.log('PR branch updated with latest changes');
+                      } catch (e) {
+                        console.log('Error updating PR branch:', e);
+                      }
+
+                      try {
+                        // Try to enable auto-merge with merge method
+                        await github.rest.pulls.enableAutoMerge({
+                          owner: context.repo.owner,
+                          repo: context.repo.repo,
+                          pull_number: ${{ steps.create-pr.outputs.result }},
+                          merge_method: 'squash'
+                        });
+                        console.log('Auto-merge enabled');
+                      } catch (e) {
+                        console.log('Could not enable auto-merge. You may need to merge it manually:', e);
+                      }
+
+            - name: Wait for PR merge
+              run: |
+                  # Wait up to 5 minutes for the PR to be merged
+                  for i in {1..30}; do
+                    PR_STATUS=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+                     "https://api.github.com/repos/${{ github.repository }}/pulls/${{ steps.create-pr.outputs.result }}" | \
+                     jq -r '.state')
+
+                    if [ "$PR_STATUS" = "closed" ]; then
+                      echo "PR has been merged or closed"
+                      break
+                    fi
+                    
+                    echo "Waiting for PR to be merged... ($i/30)"
+                    sleep 10
+                  done
+
+                  # Check if the branch was actually merged into main
+                  git fetch origin
+                  if git branch -r --contains origin/version-bump-${{ env.NEW_VERSION }} | grep -q "origin/main"; then
+                    echo "Version branch was successfully merged to main"
+                  else
+                    echo "WARNING: Version branch does not appear to be merged to main yet"
+                    echo "Please merge the PR manually before proceeding"
+                    # Don't fail the workflow, as we may want to continue with the release anyway
+                  fi
 
             - name: Create release
               id: create-release
@@ -69,7 +151,8 @@ jobs:
                         name: `v${process.env.NEW_VERSION}`,
                         body: '*This release was automatically generated with auto-incremented version.*',
                         draft: true,
-                        prerelease: false
+                        prerelease: false,
+                        target_commitish: 'main'
                       })
                       return data.id
 
@@ -96,16 +179,6 @@ jobs:
               with:
                   ref: main
                   fetch-depth: 0
-
-            - name: Setup Git
-              run: |
-                  git config --global user.name "GitHub Actions"
-                  git config --global user.email "actions@github.com"
-
-            - name: Pull latest changes with version bump
-              run: |
-                  # Make sure we have the latest changes including version bump
-                  git pull origin main
 
             - name: setup node
               uses: actions/setup-node@v4
