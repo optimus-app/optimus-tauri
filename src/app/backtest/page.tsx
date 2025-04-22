@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, RefObject } from "react";
 import HTTPRequestManager, { Methods } from "@/app/utils/HTTPRequestManager";
 import { useMemo } from "react";
 import { useTheme } from "next-themes";
@@ -34,19 +34,60 @@ import {
 import { Calendar } from "@/components/ui/calendar";
 import { useToast } from "@/hooks/use-toast";
 
-import Highcharts from "highcharts";
-import HighchartsReact from "highcharts-react-official";
-import HighchartsMore from "highcharts/highcharts-more";
-import HighchartsExporting from "highcharts/modules/exporting";
+import {
+    createChart,
+    ColorType,
+    CrosshairMode,
+    LineStyle,
+    IChartApi,
+    DeepPartial,
+    ChartOptions,
+    SeriesMarker,
+    Time,
+    MouseEventParams,
+    ISeriesApi,
+    LineData,
+} from "lightweight-charts";
 
-// Initialize Highcharts modules in client side only
-if (typeof Highcharts !== "object") {
-    HighchartsExporting(Highcharts);
-    HighchartsMore(Highcharts);
+// Define interfaces for strongly typed components
+interface ChartLegendItem {
+    color: string;
+    label: string;
+}
+
+interface DataPoint {
+    time: number | Date;
+    date?: Date;
+    value: number;
+    price?: number;
+    shortSma?: number;
+    longSma?: number;
+    performance?: number;
+    buyPrice?: number;
+    sellPrice?: number;
+    drawdown?: number;
+    [key: string]: any;
+}
+
+interface SimulationGraphProps {
+    data: DataPoint[];
+    valueKey?: string;
+    chartType?: "portfolio" | "drawdown" | "volatility";
+    parameters?: {
+        shortWindow?: number;
+        longWindow?: number;
+        [key: string]: any;
+    };
+}
+
+interface MetricsDisplayProps {
+    metrics: Record<string, { value: number }>;
+    chartsData: Record<string, DataPoint[]>;
+    selectedCharts: string[];
+    setSelectedCharts: (charts: string[]) => void;
 }
 
 // Mock algorithms
-
 const algorithms = [
     {
         name: "Moving Average Crossover",
@@ -163,6 +204,488 @@ const metricsConfig = [
     },
 ];
 
+// Chart Legend Component
+const ChartLegend = ({ items }: { items: ChartLegendItem[] }) => {
+    if (!items || items.length === 0) return null;
+
+    return (
+        <div className="flex flex-wrap gap-4 mt-4">
+            {items.map((item, i) => (
+                <div key={i} className="flex items-center">
+                    <div
+                        className="w-3 h-3 mr-2 rounded-sm"
+                        style={{ backgroundColor: item.color }}
+                    />
+                    <span className="text-sm">{item.label}</span>
+                </div>
+            ))}
+        </div>
+    );
+};
+
+// SimulationGraph component using lightweight-charts
+const SimulationGraph = ({
+    data,
+    valueKey = "value",
+    chartType = "portfolio",
+    parameters = {},
+}: SimulationGraphProps) => {
+    const chartContainerRef = useRef<HTMLDivElement>(null);
+    const chartRef = useRef<IChartApi | null>(null);
+    const tooltipRef = useRef<HTMLDivElement | null>(null);
+    const legendRef = useRef<ChartLegendItem[]>([]);
+    const { theme } = useTheme();
+
+    useEffect(() => {
+        if (!chartContainerRef.current || !data || data.length === 0) return;
+
+        // Cleanup previous chart
+        if (chartRef.current) {
+            chartRef.current.remove();
+            chartRef.current = null;
+        }
+
+        // Create tooltip element if not exists
+        if (!tooltipRef.current) {
+            const tooltipElement = document.createElement("div");
+            tooltipElement.className =
+                "absolute z-50 hidden p-2 text-xs rounded shadow bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700";
+            document.body.appendChild(tooltipElement);
+            tooltipRef.current = tooltipElement;
+        }
+
+        const isDarkTheme = theme === "dark";
+
+        // Define chart colors
+        const colors = {
+            background: isDarkTheme ? "#1e1e2d" : "#ffffff",
+            text: isDarkTheme ? "#d1d4dc" : "#333333",
+            grid: isDarkTheme
+                ? "rgba(42, 46, 57, 0.5)"
+                : "rgba(220, 220, 220, 0.8)",
+            border: isDarkTheme ? "#2b2b43" : "#d6dcde",
+            portfolio: "#0063cc",
+            price: "#82ca9d",
+            shortSma: "#f7a35c",
+            longSma: "#8085e9",
+            drawdown: "#ff4560",
+            volatility: "#775dd0",
+            buy: "#22ab94",
+            sell: "#ef5350",
+        };
+
+        // Create chart
+        const chart = createChart(chartContainerRef.current, {
+            layout: {
+                background: { type: ColorType.Solid, color: colors.background },
+                textColor: colors.text,
+            },
+            grid: {
+                vertLines: { color: colors.grid },
+                horzLines: { color: colors.grid },
+            },
+            width: chartContainerRef.current.clientWidth,
+            height: 400,
+            timeScale: {
+                timeVisible: true,
+                borderColor: colors.border,
+            },
+            crosshair: {
+                mode: CrosshairMode.Normal,
+                vertLine: {
+                    color: isDarkTheme
+                        ? "rgba(255, 255, 255, 0.2)"
+                        : "rgba(0, 0, 0, 0.2)",
+                    style: LineStyle.Dashed,
+                },
+                horzLine: {
+                    color: isDarkTheme
+                        ? "rgba(255, 255, 255, 0.2)"
+                        : "rgba(0, 0, 0, 0.2)",
+                    style: LineStyle.Dashed,
+                },
+            },
+            rightPriceScale: {
+                visible: chartType === "portfolio",
+                borderColor: colors.border,
+            },
+            leftPriceScale: {
+                visible: true,
+                borderColor: colors.border,
+            },
+        });
+
+        chartRef.current = chart;
+        legendRef.current = [];
+
+        // Format data for the main series based on chart type
+        const formattedData = data.map((point: DataPoint) => ({
+            time:
+                typeof point.time === "number"
+                    ? new Date(point.time).toISOString().split("T")[0]
+                    : (point.time as Date).toISOString().split("T")[0],
+            value: point[valueKey] as number,
+        }));
+
+        // Create main series
+        const mainSeriesColor =
+            chartType === "drawdown"
+                ? colors.drawdown
+                : chartType === "volatility"
+                ? colors.volatility
+                : colors.portfolio;
+
+        const mainSeries = chart.addLineSeries({
+            color: mainSeriesColor,
+            lineWidth: 2,
+            priceScaleId: "left",
+            title:
+                chartType === "portfolio"
+                    ? "Portfolio Value"
+                    : chartType === "drawdown"
+                    ? "Drawdown"
+                    : "Volatility",
+        });
+
+        mainSeries.setData(formattedData);
+
+        // Track legend items
+        legendRef.current.push({
+            color: mainSeriesColor,
+            label:
+                chartType === "portfolio"
+                    ? "Portfolio Value"
+                    : chartType === "drawdown"
+                    ? "Drawdown"
+                    : "Volatility",
+        });
+
+        // Add additional series for portfolio charts
+        if (chartType === "portfolio") {
+            // Price series
+            if (data[0]?.price !== undefined) {
+                const priceSeries = chart.addLineSeries({
+                    color: colors.price,
+                    lineWidth: 1,
+                    lineStyle: LineStyle.Dashed,
+                    priceScaleId: "right",
+                });
+
+                const priceData = data.map((point: DataPoint) => ({
+                    time:
+                        typeof point.time === "number"
+                            ? new Date(point.time).toISOString().split("T")[0]
+                            : (point.time as Date).toISOString().split("T")[0],
+                    value: point.price,
+                }));
+
+                priceSeries.setData(priceData);
+                legendRef.current.push({
+                    color: colors.price,
+                    label: "Asset Price",
+                });
+
+                // SMA indicators
+                if (data[0]?.shortSma !== undefined) {
+                    const shortSMA = chart.addLineSeries({
+                        color: colors.shortSma,
+                        lineWidth: 1,
+                        priceScaleId: "right",
+                    });
+
+                    const shortSmaData = data.map((point: DataPoint) => ({
+                        time:
+                            typeof point.time === "number"
+                                ? new Date(point.time)
+                                      .toISOString()
+                                      .split("T")[0]
+                                : (point.time as Date)
+                                      .toISOString()
+                                      .split("T")[0],
+                        value: point.shortSma,
+                    }));
+
+                    shortSMA.setData(shortSmaData);
+                    legendRef.current.push({
+                        color: colors.shortSma,
+                        label: `Short SMA (${parameters.shortWindow || "?"})`,
+                    });
+                }
+
+                if (data[0]?.longSma !== undefined) {
+                    const longSMA = chart.addLineSeries({
+                        color: colors.longSma,
+                        lineWidth: 1,
+                        priceScaleId: "right",
+                    });
+
+                    const longSmaData = data.map((point: DataPoint) => ({
+                        time:
+                            typeof point.time === "number"
+                                ? new Date(point.time)
+                                      .toISOString()
+                                      .split("T")[0]
+                                : (point.time as Date)
+                                      .toISOString()
+                                      .split("T")[0],
+                        value: point.longSma,
+                    }));
+
+                    longSMA.setData(longSmaData);
+                    legendRef.current.push({
+                        color: colors.longSma,
+                        label: `Long SMA (${parameters.longWindow || "?"})`,
+                    });
+                }
+
+                // Add buy/sell markers
+                const markers: SeriesMarker<Time>[] = [];
+                let hasBuy = false;
+                let hasSell = false;
+
+                data.forEach((point: DataPoint) => {
+                    if (point.buyPrice) {
+                        hasBuy = true;
+                        markers.push({
+                            time:
+                                typeof point.time === "number"
+                                    ? new Date(point.time)
+                                          .toISOString()
+                                          .split("T")[0]
+                                    : (point.time as Date)
+                                          .toISOString()
+                                          .split("T")[0],
+                            position: "belowBar",
+                            color: colors.buy,
+                            shape: "arrowUp",
+                            text: "Buy",
+                        });
+                    }
+
+                    if (point.sellPrice) {
+                        hasSell = true;
+                        markers.push({
+                            time:
+                                typeof point.time === "number"
+                                    ? new Date(point.time)
+                                          .toISOString()
+                                          .split("T")[0]
+                                    : (point.time as Date)
+                                          .toISOString()
+                                          .split("T")[0],
+                            position: "aboveBar",
+                            color: colors.sell,
+                            shape: "arrowDown",
+                            text: "Sell",
+                        });
+                    }
+                });
+
+                if (markers.length > 0) {
+                    mainSeries.setMarkers(markers);
+                    if (hasBuy)
+                        legendRef.current.push({
+                            color: colors.buy,
+                            label: "Buy Signal",
+                        });
+                    if (hasSell)
+                        legendRef.current.push({
+                            color: colors.sell,
+                            label: "Sell Signal",
+                        });
+                }
+            }
+        }
+
+        // Custom tooltip handler
+        chart.subscribeCrosshairMove((param: MouseEventParams) => {
+            if (!tooltipRef.current) return;
+
+            // Hide tooltip when out of bounds
+            if (
+                param.point === undefined ||
+                !param.time ||
+                param.point.x < 0 ||
+                (chartContainerRef.current &&
+                    param.point.x > chartContainerRef.current.clientWidth) ||
+                param.point.y < 0 ||
+                (chartContainerRef.current &&
+                    param.point.y > chartContainerRef.current.clientHeight)
+            ) {
+                tooltipRef.current.style.display = "none";
+                return;
+            }
+
+            // Format ISO string for matching
+            const dateStr = param.time;
+
+            // Find the corresponding data point
+            const dataPoint = data.find((point: DataPoint) => {
+                const pointDate =
+                    typeof point.time === "number"
+                        ? new Date(point.time).toISOString().split("T")[0]
+                        : (point.time as Date).toISOString().split("T")[0];
+                return pointDate === dateStr;
+            });
+
+            if (!dataPoint) {
+                tooltipRef.current.style.display = "none";
+                return;
+            }
+
+            // Build tooltip content
+            let content = `<div class="font-medium mb-1">${new Date(
+                dataPoint.time instanceof Date ? dataPoint.time : dataPoint.time
+            ).toLocaleDateString()}</div>`;
+
+            // Add data based on chart type
+            if (chartType === "portfolio") {
+                content += `<div>Portfolio: $${(
+                    dataPoint[valueKey] as number
+                ).toFixed(2)}</div>`;
+
+                if (dataPoint.price !== undefined) {
+                    content += `<div>Price: $${dataPoint.price.toFixed(
+                        2
+                    )}</div>`;
+                }
+
+                if (dataPoint.shortSma !== undefined) {
+                    content += `<div>Short SMA: $${dataPoint.shortSma.toFixed(
+                        2
+                    )}</div>`;
+                }
+
+                if (dataPoint.longSma !== undefined) {
+                    content += `<div>Long SMA: $${dataPoint.longSma.toFixed(
+                        2
+                    )}</div>`;
+                }
+
+                if (dataPoint.buyPrice) {
+                    content += `<div class="text-green-500">Buy: $${dataPoint.buyPrice.toFixed(
+                        2
+                    )}</div>`;
+                }
+
+                if (dataPoint.sellPrice) {
+                    content += `<div class="text-red-500">Sell: $${dataPoint.sellPrice.toFixed(
+                        2
+                    )}</div>`;
+                }
+            } else if (chartType === "drawdown") {
+                content += `<div>Drawdown: ${(
+                    (dataPoint[valueKey] as number) * 100
+                ).toFixed(2)}%</div>`;
+            } else if (chartType === "volatility") {
+                content += `<div>Volatility: ${(
+                    (dataPoint[valueKey] as number) * 100
+                ).toFixed(2)}%</div>`;
+            }
+
+            if (tooltipRef.current) {
+                tooltipRef.current.innerHTML = content;
+                tooltipRef.current.style.display = "block";
+            }
+
+            // Position tooltip
+            if (chartContainerRef.current && tooltipRef.current) {
+                const offset = 15;
+                let left = param.point.x + offset;
+                const tooltipWidth = 150;
+
+                if (
+                    left >
+                    chartContainerRef.current.clientWidth - tooltipWidth
+                ) {
+                    left = param.point.x - tooltipWidth - offset;
+                }
+
+                let top = param.point.y + offset;
+                const tooltipHeight = 120;
+
+                if (
+                    top >
+                    chartContainerRef.current.clientHeight - tooltipHeight
+                ) {
+                    top = param.point.y - tooltipHeight - offset;
+                }
+
+                const rect = chartContainerRef.current.getBoundingClientRect();
+                tooltipRef.current.style.left = `${
+                    left + rect.left + window.scrollX
+                }px`;
+                tooltipRef.current.style.top = `${
+                    top + rect.top + window.scrollY
+                }px`;
+            }
+        });
+
+        // Fit content to view all data
+        chart.timeScale().fitContent();
+
+        // Handle resize
+        const handleResize = () => {
+            if (chartContainerRef.current && chartRef.current) {
+                chartRef.current.applyOptions({
+                    width: chartContainerRef.current.clientWidth,
+                });
+            }
+        };
+
+        window.addEventListener("resize", handleResize);
+
+        // Remove TradingView logo
+        const removeTradingViewLogo = () => {
+            const logoElement = document.getElementById("tv-attr-logo");
+            if (logoElement) {
+                logoElement.remove();
+            }
+        };
+
+        removeTradingViewLogo();
+
+        // Set up MutationObserver to catch if logo gets added later
+        const observer = new MutationObserver(() => {
+            removeTradingViewLogo();
+        });
+
+        if (chartContainerRef.current) {
+            observer.observe(chartContainerRef.current, {
+                childList: true,
+                subtree: true,
+            });
+        }
+
+        return () => {
+            window.removeEventListener("resize", handleResize);
+            observer.disconnect();
+            if (tooltipRef.current) {
+                document.body.removeChild(tooltipRef.current);
+                tooltipRef.current = null;
+            }
+            if (chartRef.current) {
+                chartRef.current.remove();
+            }
+        };
+    }, [data, valueKey, chartType, theme, parameters]);
+
+    if (!data || data.length === 0) {
+        return (
+            <div className="text-center text-muted-foreground">
+                No data available.
+            </div>
+        );
+    }
+
+    return (
+        <div className="w-full">
+            <div ref={chartContainerRef} className="w-full h-[400px]" />
+            <ChartLegend items={legendRef.current} />
+        </div>
+    );
+};
+
 export default function BacktestingPage() {
     const { setTheme } = useTheme();
     const { toast } = useToast();
@@ -170,7 +693,7 @@ export default function BacktestingPage() {
 
     // State
     const [selectedAlgorithm] = useState(algorithms[0].name);
-    const [parameters, setParameters] = useState(
+    const [parameters, setParameters] = useState<Record<string, number>>(
         Object.fromEntries(
             algorithms[0].parameters.map((p) => [p.name, p.default])
         )
@@ -182,9 +705,14 @@ export default function BacktestingPage() {
     const [endDate, setEndDate] = useState<Date | undefined>(
         new Date("2023-01-01")
     );
-    const [simulationData, setSimulationData] = useState<any[]>([]);
-    const [metrics, setMetrics] = useState<any>(null);
-    const [chartsData, setChartsData] = useState<any>({});
+    const [simulationData, setSimulationData] = useState<DataPoint[]>([]);
+    const [metrics, setMetrics] = useState<Record<
+        string,
+        { value: number }
+    > | null>(null);
+    const [chartsData, setChartsData] = useState<Record<string, DataPoint[]>>(
+        {}
+    );
     const [selectedCharts, setSelectedCharts] = useState<string[]>([]);
     const [isRunning, setIsRunning] = useState(false);
     const [activeTab, setActiveTab] = useState("chart");
@@ -323,7 +851,7 @@ export default function BacktestingPage() {
 
         // Create chart data for various metrics
         const drawdownData = formattedData.map(
-            (point: any, i: number, arr: any[]) => {
+            (point: DataPoint, i: number, arr: DataPoint[]) => {
                 const maxValue = Math.max(
                     ...arr.slice(0, i + 1).map((p) => p.value)
                 );
@@ -339,7 +867,7 @@ export default function BacktestingPage() {
 
         const volatilityData = formattedData
             .slice(1)
-            .map((point: any, i: number) => {
+            .map((point: DataPoint, i: number) => {
                 const prevValue = formattedData[i].value;
                 const returnVal = (point.value - prevValue) / prevValue;
                 return {
@@ -454,383 +982,13 @@ export default function BacktestingPage() {
         </div>
     );
 
-    // Enhanced Simulation Graph with Highcharts
-    // Enhanced Simulation Graph with Highcharts
-    const SimulationGraph = ({
-        data,
-        valueKey = "value",
-        chartType = "portfolio",
-    }: {
-        data: any[];
-        valueKey?: string;
-        chartType?: string;
-    }) => {
-        if (data.length === 0) {
-            return (
-                <div className="text-center text-muted-foreground">
-                    No data available.
-                </div>
-            );
-        }
-
-        // Prepare series data for Highcharts
-        const series = [];
-        const buySignals: any[] = [];
-        const sellSignals: any[] = [];
-        const buyLines = [];
-        const sellLines = [];
-
-        // Add portfolio value or selected metric series
-        const mainSeriesData = data.map((point) => [
-            point.time,
-            point[valueKey],
-        ]);
-        series.push({
-            name:
-                chartType === "portfolio"
-                    ? "Portfolio Value"
-                    : chartType === "drawdown"
-                    ? "Drawdown"
-                    : "Volatility",
-            data: mainSeriesData,
-            tooltip: {
-                valueDecimals: 2,
-                valuePrefix: chartType === "portfolio" ? "$" : "",
-                valueSuffix: chartType !== "portfolio" ? "%" : "",
-            },
-            zIndex: 1,
-        });
-
-        // Add price and SMA series if available and this is a portfolio chart
-        if (chartType === "portfolio" && data[0]?.price !== undefined) {
-            // Asset price series
-            series.push({
-                name: "Asset Price",
-                data: data.map((point) => [point.time, point.price]),
-                yAxis: 1,
-                tooltip: {
-                    valueDecimals: 2,
-                    valuePrefix: "$",
-                },
-                dashStyle: "shortdot",
-                zIndex: 1,
-            });
-
-            // SMA series if available
-            if (data[0]?.shortSma !== undefined) {
-                series.push({
-                    name: `Short SMA (${parameters.shortWindow})`,
-                    data: data.map((point) => [point.time, point.shortSma]),
-                    yAxis: 1,
-                    tooltip: {
-                        valueDecimals: 2,
-                        valuePrefix: "$",
-                    },
-                    zIndex: 1,
-                });
-            }
-
-            if (data[0]?.longSma !== undefined) {
-                series.push({
-                    name: `Long SMA (${parameters.longWindow})`,
-                    data: data.map((point) => [point.time, point.longSma]),
-                    yAxis: 1,
-                    tooltip: {
-                        valueDecimals: 2,
-                        valuePrefix: "$",
-                    },
-                    zIndex: 1,
-                });
-            }
-
-            // Get max and min values for price axis to set vertical line heights
-            let maxPrice = Math.max(...data.map((point) => point.price || 0));
-            let minPrice = Math.min(...data.map((point) => point.price || 0));
-
-            // Add a small buffer for visual clarity
-            maxPrice = maxPrice * 1.02;
-            minPrice = minPrice * 0.98;
-
-            // Prepare buy/sell signals
-            data.forEach((point) => {
-                if (point.buyPrice) {
-                    // Buy signal point
-                    buySignals.push({
-                        x: point.time,
-                        y: point.buyPrice,
-                        marker: {
-                            enabled: true,
-                            symbol: "circle",
-                            fillColor: "green",
-                            lineColor: "white",
-                            lineWidth: 1,
-                            radius: 3,
-                        },
-                        title: "Buy",
-                        text: `Buy signal at $${point.buyPrice.toFixed(2)}`,
-                    });
-
-                    // Buy signal vertical line
-                    buyLines.push({
-                        x: point.time,
-                        y: maxPrice - minPrice,
-                        low: minPrice,
-                        high: maxPrice,
-                    });
-                }
-                if (point.sellPrice) {
-                    // Sell signal point
-                    sellSignals.push({
-                        x: point.time,
-                        y: point.sellPrice,
-                        marker: {
-                            enabled: true,
-                            symbol: "circle",
-                            fillColor: "red",
-                            lineColor: "white",
-                            lineWidth: 1,
-                            radius: 3,
-                        },
-                        title: "Sell",
-                        text: `Sell signal at $${point.sellPrice.toFixed(2)}`,
-                    });
-
-                    // Sell signal vertical line
-                    sellLines.push({
-                        x: point.time,
-                        y: maxPrice - minPrice,
-                        low: minPrice,
-                        high: maxPrice,
-                    });
-                }
-            });
-
-            // Add buy/sell signals as series
-            if (buySignals.length > 0) {
-                series.push({
-                    name: "Buy Signals",
-                    type: "scatter",
-                    data: buySignals,
-                    yAxis: 1,
-                    tooltip: {
-                        pointFormat: "<b>Buy Signal</b>: ${point.y:.2f}",
-                    },
-                    showInLegend: true,
-                    zIndex: 5,
-                    marker: {
-                        enabled: true,
-                        symbol: "circle",
-                        radius: 6,
-                    },
-                });
-            }
-
-            if (sellSignals.length > 0) {
-                series.push({
-                    name: "Sell Signals",
-                    type: "scatter",
-                    data: sellSignals,
-                    yAxis: 1,
-                    tooltip: {
-                        pointFormat: "<b>Sell Signal</b>: ${point.y:.2f}",
-                    },
-                    showInLegend: true,
-                    zIndex: 5,
-                    marker: {
-                        enabled: true,
-                        symbol: "circle",
-                        radius: 6,
-                    },
-                });
-            }
-        }
-
-        // Configure chart options
-        const options = {
-            chart: {
-                height: 500,
-                zoomType: "x",
-                backgroundColor: "transparent",
-                style: {
-                    fontFamily: "Inter, system-ui, sans-serif",
-                },
-            },
-            time: {
-                useUTC: false,
-            },
-            title: {
-                text: null,
-            },
-            xAxis: {
-                type: "datetime",
-                lineColor: "#333",
-                labels: {
-                    style: {
-                        color: "#888",
-                    },
-                },
-                crosshair: true,
-            },
-            yAxis:
-                chartType === "portfolio"
-                    ? [
-                          {
-                              // Left y-axis for portfolio value
-                              title: {
-                                  text: "Portfolio Value ($)",
-                                  style: {
-                                      color: "#8884d8",
-                                  },
-                              },
-                              labels: {
-                                  style: {
-                                      color: "#888",
-                                  },
-                              },
-                              gridLineColor: "#222",
-                          },
-                          {
-                              // Right y-axis for price and SMAs
-                              title: {
-                                  text: "Price ($)",
-                                  style: {
-                                      color: "#82ca9d",
-                                  },
-                              },
-                              labels: {
-                                  style: {
-                                      color: "#888",
-                                  },
-                              },
-                              opposite: true,
-                              gridLineColor: "#222",
-                          },
-                      ]
-                    : [
-                          {
-                              // Single axis for other charts
-                              title: {
-                                  text:
-                                      chartType === "drawdown"
-                                          ? "Drawdown (%)"
-                                          : "Volatility (%)",
-                                  style: {
-                                      color: "#8884d8",
-                                  },
-                              },
-                              labels: {
-                                  style: {
-                                      color: "#888",
-                                  },
-                                  formatter: function (
-                                      this: Highcharts.AxisLabelsFormatterContextObject
-                                  ) {
-                                      return (
-                                          (
-                                              (this.value as number) * 100
-                                          ).toFixed(2) + "%"
-                                      );
-                                  },
-                              },
-                              gridLineColor: "#222",
-                          },
-                      ],
-            legend: {
-                enabled: true,
-                itemStyle: {
-                    color: "#888",
-                },
-            },
-            plotOptions: {
-                series: {
-                    animation: true,
-                    marker: {
-                        enabled: false,
-                    },
-                },
-                scatter: {
-                    marker: {
-                        enabled: true,
-                        radius: 6,
-                    },
-                    states: {
-                        hover: {
-                            enabled: true,
-                            lineWidthPlus: 0,
-                        },
-                    },
-                },
-                columnrange: {
-                    dataLabels: {
-                        enabled: false,
-                    },
-                },
-            },
-            tooltip: {
-                shared: true,
-                crosshairs: true,
-                backgroundColor: "rgba(40, 40, 40, 0.9)",
-                borderColor: "#444",
-                borderRadius: 6,
-                borderWidth: 1,
-                shadow: true,
-                style: {
-                    color: "#eee",
-                },
-            },
-            series,
-            responsive: {
-                rules: [
-                    {
-                        condition: {
-                            maxWidth: 500,
-                        },
-                        chartOptions: {
-                            legend: {
-                                layout: "horizontal",
-                                align: "center",
-                                verticalAlign: "bottom",
-                            },
-                        },
-                    },
-                ],
-            },
-            exporting: {
-                enabled: false,
-                buttons: {
-                    contextButton: {
-                        menuItems: [
-                            "viewFullscreen",
-                            "printChart",
-                            "separator",
-                            "downloadPNG",
-                            "downloadJPEG",
-                            "downloadPDF",
-                            "downloadSVG",
-                        ],
-                    },
-                },
-            },
-            credits: {
-                enabled: false,
-            },
-        };
-
-        return <HighchartsReact highcharts={Highcharts} options={options} />;
-    };
-
     // Metrics Display
     const MetricsDisplay = ({
         metrics,
         chartsData,
         selectedCharts,
         setSelectedCharts,
-    }: {
-        metrics: any;
-        chartsData: any;
-        selectedCharts: string[];
-        setSelectedCharts: (charts: string[]) => void;
-    }) => {
+    }: MetricsDisplayProps) => {
         if (!metrics) {
             return (
                 <div className="text-center text-muted-foreground">
@@ -926,6 +1084,7 @@ export default function BacktestingPage() {
                                             ? "drawdown"
                                             : "volatility"
                                     }
+                                    parameters={parameters}
                                 />
                             </CardContent>
                         </Card>
@@ -936,7 +1095,11 @@ export default function BacktestingPage() {
     };
 
     // AI Insights component
-    const AIInsights = ({ metrics }: { metrics: any }) => {
+    const AIInsights = ({
+        metrics,
+    }: {
+        metrics: Record<string, { value: number }> | null;
+    }) => {
         if (!metrics) {
             return (
                 <div className="text-center text-muted-foreground">
@@ -1105,6 +1268,7 @@ export default function BacktestingPage() {
                                 <SimulationGraph
                                     data={simulationData}
                                     chartType="portfolio"
+                                    parameters={parameters}
                                 />
                             </TabsContent>
 

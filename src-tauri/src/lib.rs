@@ -20,6 +20,10 @@ lazy_static! {
             "backtest".to_string(),
             "http://localhost:3000/backtest".to_string(),
         );
+        m.insert(
+            "ml".to_string(),
+            "http://localhost:3000/ml-charts".to_string(),
+        );
         m
     };
 }
@@ -51,7 +55,7 @@ async fn create_window(
             .build()
             .unwrap();
 
-        window.open_devtools();
+        // window.open_devtools();
         state.window_id += 1;
         window
     };

@@ -75,6 +75,16 @@ jobs:
                   sudo apt-get update
                   sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 
+            - name: transform URLs for production
+              run: |
+                  if [[ "${{ matrix.platform }}" == "windows-latest" ]]; then
+                    sed -i 's|"http://localhost:3000/\([^"]*\)"|"\1.html"|g' src-tauri/src/lib.rs
+                  else
+                    sed -i '' 's|"http://localhost:3000/\([^"]*\)"|"\1.html"|g' src-tauri/src/lib.rs
+                  fi
+                  echo "Modified lib.rs for production build:"
+                  cat src-tauri/src/lib.rs
+
             - name: install frontend dependencies
               run: npm install
 

@@ -51,7 +51,7 @@ import {
 } from "@/components/ui/sidebar";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AppSidebar } from "@/components/app-sidebar";
-import WebSocketManager from "../utils/WebSocketManager";
+import WebSocketManager, { ProtocolType } from "../utils/WebSocketManager";
 import HTTPRequestManager, { Methods } from "../utils/HTTPRequestManager";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useTheme } from "next-themes";
@@ -110,7 +110,7 @@ async function sendMessageToServer(
     httpManager: HTTPRequestManager
 ) {
     // Validate content before sending
-    if (!content || content.trim() === '') {
+    if (!content || content.trim() === "") {
         console.warn("Attempted to send empty message");
         return;
     }
@@ -120,14 +120,16 @@ async function sendMessageToServer(
         sender: user,
         roomId: chatRoom,
     };
-    
+
     try {
         await httpManager
             .handleRequest("chat/message", Methods.POST, payload)
             .then((r) => {
                 console.log("Message sent successfully:", r);
                 // Return a promise that resolves after a short delay
-                return new Promise(resolve => setTimeout(() => resolve(r), 300));
+                return new Promise((resolve) =>
+                    setTimeout(() => resolve(r), 300)
+                );
             });
     } catch (error) {
         console.error("Message send error:", error);
@@ -161,13 +163,13 @@ async function addUsersToChatRoom(
     httpManager: HTTPRequestManager
 ) {
     const payload = {
-        usersToAdd: users
+        usersToAdd: users,
     };
-    
+
     try {
         const response = await httpManager.handleRequest(
-            `chat/room/${roomId}/addUsers`, 
-            Methods.POST, 
+            `chat/room/${roomId}/addUsers`,
+            Methods.POST,
             payload
         );
         console.log("Users added to chatroom:", response);
@@ -186,9 +188,9 @@ async function leaveChatRoom(
 ) {
     const payload = {
         roomId: roomId,
-        username: username
+        username: username,
     };
-    
+
     try {
         const response = await httpManager.handleRequest(
             `chat/room/${roomId}/leave`,
@@ -223,12 +225,15 @@ export default function CardsChat() {
 
     const [createRoomOpen, setCreateRoomOpen] = useState(false);
     const [roomTitle, setRoomTitle] = useState("");
-    const [selectedMembers, setSelectedMembers] = useState<string[]>([userName]);
+    const [selectedMembers, setSelectedMembers] = useState<string[]>([
+        userName,
+    ]);
 
     // New state for confirming leave room action
     const [leaveRoomDialogOpen, setLeaveRoomDialogOpen] = useState(false);
 
     const lastMessageRef = useRef<HTMLDivElement>(null);
+    const CHAT_WS_CONNECTION_ID = "chat-connection";
 
     // --- Create a new chat room ---
     const handleCreateRoom = async () => {
@@ -256,12 +261,12 @@ export default function CardsChat() {
 
         try {
             // Extract emails from selected users
-            const userEmails = selectedUsers.map(user => user.email);
-            
+            const userEmails = selectedUsers.map((user) => user.email);
+
             await addUsersToChatRoom(activeChatId, userEmails, httpManager);
             setOpen(false);
             setSelectedUsers([]);
-            
+
             // Refresh the chat rooms list to update member information
             refreshChatRooms();
         } catch (error) {
@@ -272,16 +277,20 @@ export default function CardsChat() {
     // --- Leave chat room ---
     const handleLeaveRoom = async () => {
         if (!activeChatId) return;
-        
+
         try {
-            const success = await leaveChatRoom(activeChatId, userName, httpManager);
-            
+            const success = await leaveChatRoom(
+                activeChatId,
+                userName,
+                httpManager
+            );
+
             if (success) {
                 // Remove the room from local state
                 const updatedItems = chatData.navMain[0].items.filter(
                     (item: any) => item.id !== activeChatId
                 );
-                
+
                 const updatedChatData = {
                     navMain: [
                         {
@@ -290,9 +299,9 @@ export default function CardsChat() {
                         },
                     ],
                 };
-                
+
                 setChatData(updatedChatData);
-                
+
                 // Clear current active chat
                 setActiveChatId(null);
                 setActiveChatName("");
@@ -315,7 +324,7 @@ export default function CardsChat() {
 
             console.log("Chat room response:", response);
             const rooms = Array.isArray(response) ? response : [response];
-            
+
             const formattedData = {
                 navMain: [
                     {
@@ -328,16 +337,17 @@ export default function CardsChat() {
                             id: room.roomId,
                             members: room.members
                                 ? room.members
-                                    .map((member: string) => 
-                                        member === userName ? "me" : member)
-                                    .join(", ")
+                                      .map((member: string) =>
+                                          member === userName ? "me" : member
+                                      )
+                                      .join(", ")
                                 : "",
                             isActive: activeChatId === room.roomId,
                         })),
                     },
                 ],
             };
-            
+
             setChatData(formattedData);
         } catch (error) {
             console.error("Error refreshing chat rooms:", error);
@@ -371,15 +381,12 @@ export default function CardsChat() {
                 messagesArray = [];
             }
 
-            messagesArray.forEach((item: any) => {
-                setMessages((prev) => [
-                    ...prev,
-                    {
-                        role: item.sender === userName ? "user" : "agent",
-                        content: item.content,
-                    },
-                ]);
-            });
+            const formattedMessages = messagesArray.map((item: any) => ({
+                role: item.sender === userName ? "user" : "agent",
+                content: item.content,
+            }));
+
+            setMessages(formattedMessages);
         } catch (error) {
             console.error("Failed to load chat messages:", error);
             setMessages([
@@ -433,12 +440,15 @@ export default function CardsChat() {
                                 url: "#",
                                 id: room.roomId,
                                 // Format members as a comma-separated string.
-                                members: (room.members
-                                ? room.members
-                                    .map((member: string) => 
-                                        member === userName ? "me" : member)
-                                    .join(", ")
-                                : ""),
+                                members: room.members
+                                    ? room.members
+                                          .map((member: string) =>
+                                              member === userName
+                                                  ? "me"
+                                                  : member
+                                          )
+                                          .join(", ")
+                                    : "",
                                 isActive: false,
                             })),
                         },
@@ -460,44 +470,70 @@ export default function CardsChat() {
 
         const initWebSocket = async () => {
             try {
-                wsManager.addSubscriptionPath(
+                wsManager.addConnection(
+                    CHAT_WS_CONNECTION_ID,
+                    "ws://localhost:8080/connect/chat",
+                    ProtocolType.STOMP
+                );
+                wsManager.addSubscriptionToConnection(
+                    CHAT_WS_CONNECTION_ID,
                     `/subscribe/chat/messages/${userName}`,
                     (msg: any) => {
-                        if (msg && msg.content && typeof msg.content === 'string' && msg.content.trim() !== '') {
-                            console.log("Received WebSocket message:", msg);
-                            setMessages((prev) => [
-                                ...prev,
-                                {
-                                    role: msg.sender === userName ? "user" : "agent",
-                                    content: msg.content,
-                                },
-                            ]);
-                            
-                            // Scroll to bottom with delay to ensure message is rendered
-                            setTimeout(() => {
-                                if (lastMessageRef.current) {
-                                    lastMessageRef.current.scrollIntoView({
-                                        behavior: "smooth",
-                                        block: "end",
-                                    });
-                                }
-                            }, 100);
+                        console.log("Received webscket");
+                        const parsedMsg = JSON.parse(msg);
+                        if (
+                            parsedMsg &&
+                            parsedMsg.content &&
+                            typeof parsedMsg.content === "string" &&
+                            parsedMsg.content.trim() !== "" &&
+                            parsedMsg.roomId !== undefined
+                        ) {
+                            // Only add message to UI if it belongs to the currently active chat room
+                            if (parsedMsg.roomId === activeChatId) {
+                                setMessages((prev) => [
+                                    ...prev,
+                                    {
+                                        role:
+                                            parsedMsg.sender === userName
+                                                ? "user"
+                                                : "agent",
+                                        content: parsedMsg.content,
+                                    },
+                                ]);
+
+                                setTimeout(() => {
+                                    if (lastMessageRef.current) {
+                                        lastMessageRef.current.scrollIntoView({
+                                            behavior: "smooth",
+                                            block: "end",
+                                        });
+                                    }
+                                }, 100);
+                            } else {
+                                console.log(
+                                    `Received message for room ${parsedMsg.roomId}, but currently in room ${activeChatId}`
+                                );
+                            }
                         } else {
-                            console.warn("Received invalid message format:", msg);
+                            console.warn(
+                                "Received invalid message format:",
+                                msg
+                            );
                         }
                     }
                 );
-                
+
                 // Add subscription for room updates
-                wsManager.addSubscriptionPath(
+                wsManager.addSubscriptionToConnection(
+                    CHAT_WS_CONNECTION_ID,
                     `/subscribe/chat/room/update/${userName}`,
                     (room: any) => {
                         console.log("Room updated:", room);
                         refreshChatRooms();
                     }
                 );
-                
-                await wsManager.start();
+
+                await wsManager.startConnection(CHAT_WS_CONNECTION_ID);
                 setIsWebSocketReady(true);
             } catch (error) {
                 console.error("WebSocket initialization failed:", error);
@@ -569,7 +605,6 @@ export default function CardsChat() {
             : null;
 
     return (
-        
         <SidebarProvider
             style={
                 {
@@ -586,17 +621,17 @@ export default function CardsChat() {
                     display: "flex",
                 }}
             >
-                <div 
+                <div
                     style={{
-                        position: 'fixed',
+                        position: "fixed",
                         bottom: 20,
                         left: 16,
-                        width: 'calc(19rem - 32px)',
+                        width: "calc(19rem - 32px)",
                         zIndex: 50,
                     }}
                 >
-                    <Button 
-                        variant="outline" 
+                    <Button
+                        variant="outline"
                         className="w-full flex items-center justify-center gap-2 shadow-md"
                         onClick={() => setCreateRoomOpen(true)}
                     >
@@ -617,7 +652,10 @@ export default function CardsChat() {
                 <SidebarInset>
                     <header className="flex h-16 shrink-0 items-center gap-2 px-4">
                         <SidebarTrigger className="-ml-1" />
-                        <Separator orientation="vertical" className="mr-2 h-4" />
+                        <Separator
+                            orientation="vertical"
+                            className="mr-2 h-4"
+                        />
                         <Breadcrumb>
                             <BreadcrumbList>
                                 <BreadcrumbItem className="hidden md:block">
@@ -659,7 +697,8 @@ export default function CardsChat() {
                                                 {activeChatName || "Chat"}
                                             </p>
                                             <p className="text-sm text-muted-foreground">
-                                                {currentRoom && currentRoom.members
+                                                {currentRoom &&
+                                                currentRoom.members
                                                     ? currentRoom.members
                                                     : ""}
                                             </p>
@@ -674,7 +713,11 @@ export default function CardsChat() {
                                                         size="icon"
                                                         variant="outline"
                                                         className="rounded-full"
-                                                        onClick={() => setLeaveRoomDialogOpen(true)}
+                                                        onClick={() =>
+                                                            setLeaveRoomDialogOpen(
+                                                                true
+                                                            )
+                                                        }
                                                     >
                                                         <LogOut className="h-4 w-4" />
                                                         <span className="sr-only">
@@ -687,7 +730,7 @@ export default function CardsChat() {
                                                 </TooltipContent>
                                             </Tooltip>
                                         </TooltipProvider>
-                                        
+
                                         {/* Add Users Button */}
                                         <TooltipProvider delayDuration={0}>
                                             <Tooltip>
@@ -696,7 +739,9 @@ export default function CardsChat() {
                                                         size="icon"
                                                         variant="outline"
                                                         className="rounded-full"
-                                                        onClick={() => setOpen(true)}
+                                                        onClick={() =>
+                                                            setOpen(true)
+                                                        }
                                                     >
                                                         <Plus />
                                                         <span className="sr-only">
@@ -721,22 +766,25 @@ export default function CardsChat() {
                                             </div>
                                         ) : (
                                             <div className="space-y-4 p-4">
-                                                {messages.map((message, index) => (
-                                                    <div
-                                                        key={index}
-                                                        className={cn(
-                                                            "flex w-max max-w-[75%] flex-col gap-2 rounded-lg px-3 py-2 text-sm",
-                                                            message.role === "user"
-                                                                ? "ml-auto bg-primary text-primary-foreground"
-                                                                : message.role ===
-                                                                "system"
-                                                                ? "mx-auto bg-destructive text-destructive-foreground"
-                                                                : "bg-muted"
-                                                        )}
-                                                    >
-                                                        {message.content}
-                                                    </div>
-                                                ))}
+                                                {messages.map(
+                                                    (message, index) => (
+                                                        <div
+                                                            key={index}
+                                                            className={cn(
+                                                                "flex w-max max-w-[75%] flex-col gap-2 rounded-lg px-3 py-2 text-sm",
+                                                                message.role ===
+                                                                    "user"
+                                                                    ? "ml-auto bg-primary text-primary-foreground"
+                                                                    : message.role ===
+                                                                      "system"
+                                                                    ? "mx-auto bg-destructive text-destructive-foreground"
+                                                                    : "bg-muted"
+                                                            )}
+                                                        >
+                                                            {message.content}
+                                                        </div>
+                                                    )
+                                                )}
                                                 <div ref={lastMessageRef} />
                                             </div>
                                         )}
@@ -747,24 +795,26 @@ export default function CardsChat() {
                                         onSubmit={async (event) => {
                                             event.preventDefault();
                                             if (inputLength === 0) return;
-                                            
+
                                             const messageText = input.trim();
                                             setInput("");
-                                            
+
                                             try {
                                                 // Only show optimistic UI update for non-empty messages
                                                 if (messageText) {
                                                     // Add message to local state with a unique ID
-                                                    const messageId = Date.now().toString();
-                                                    setMessages(prev => [
+                                                    const messageId =
+                                                        Date.now().toString();
+                                                    setMessages((prev) => [
                                                         ...prev,
                                                         {
                                                             id: messageId,
                                                             role: "user",
-                                                            content: messageText
-                                                        } as any
+                                                            content:
+                                                                messageText,
+                                                        } as any,
                                                     ]);
-                                                    
+
                                                     // Send with delay for proper syncing
                                                     await sendMessageToServer(
                                                         Number(activeChatId),
@@ -773,18 +823,26 @@ export default function CardsChat() {
                                                         httpManager
                                                     );
                                                 }
-                                                
+
                                                 // Add a small delay before scrolling
                                                 setTimeout(() => {
-                                                    if (lastMessageRef.current) {
-                                                        lastMessageRef.current.scrollIntoView({
-                                                            behavior: "smooth",
-                                                            block: "end",
-                                                        });
+                                                    if (
+                                                        lastMessageRef.current
+                                                    ) {
+                                                        lastMessageRef.current.scrollIntoView(
+                                                            {
+                                                                behavior:
+                                                                    "smooth",
+                                                                block: "end",
+                                                            }
+                                                        );
                                                     }
                                                 }, 100);
                                             } catch (error) {
-                                                console.error("Error sending message:", error);
+                                                console.error(
+                                                    "Error sending message:",
+                                                    error
+                                                );
                                             }
                                         }}
                                         className="flex w-full items-center space-x-2"
@@ -805,7 +863,9 @@ export default function CardsChat() {
                                             disabled={inputLength === 0}
                                         >
                                             <Send />
-                                            <span className="sr-only">Send</span>
+                                            <span className="sr-only">
+                                                Send
+                                            </span>
                                         </Button>
                                     </form>
                                 </CardFooter>
@@ -813,7 +873,7 @@ export default function CardsChat() {
                         )}
                     </div>
                 </SidebarInset>
-                
+
                 {/* Dialog for Adding Users to Chat */}
                 <Dialog open={open} onOpenChange={setOpen}>
                     <DialogContent className="gap-0 p-0 outline-none">
@@ -832,63 +892,84 @@ export default function CardsChat() {
                                         // Filter out users who are already members
                                         .filter((user) => {
                                             // If we have a current room
-                                            if (currentRoom && currentRoom.members) {
+                                            if (
+                                                currentRoom &&
+                                                currentRoom.members
+                                            ) {
                                                 // Check if the user's email is in the members list
-                                                const memberEmails: string[] = currentRoom.members
-                                                    .split(", ")
-                                                    .map((member: string): string => {
-                                                        // Handle the "me" case which represents the current user
-                                                        return member === "me" ? userName : member;
-                                                    });
-                                                    
+                                                const memberEmails: string[] =
+                                                    currentRoom.members
+                                                        .split(", ")
+                                                        .map(
+                                                            (
+                                                                member: string
+                                                            ): string => {
+                                                                // Handle the "me" case which represents the current user
+                                                                return member ===
+                                                                    "me"
+                                                                    ? userName
+                                                                    : member;
+                                                            }
+                                                        );
+
                                                 // Only show users who are NOT already members
-                                                return !memberEmails.includes(user.email);
+                                                return !memberEmails.includes(
+                                                    user.email
+                                                );
                                             }
                                             // If no current room or no members, show all users
                                             return true;
                                         })
                                         .map((user) => (
-                                        <CommandItem
-                                            key={user.email}
-                                            className="flex items-center px-2"
-                                            onSelect={() => {
-                                                if (selectedUsers.includes(user)) {
-                                                    return setSelectedUsers(
-                                                        selectedUsers.filter(
-                                                            (selectedUser) =>
-                                                                selectedUser !==
-                                                                user
+                                            <CommandItem
+                                                key={user.email}
+                                                className="flex items-center px-2"
+                                                onSelect={() => {
+                                                    if (
+                                                        selectedUsers.includes(
+                                                            user
                                                         )
-                                                    );
-                                                }
-                                                return setSelectedUsers([
-                                                    ...selectedUsers,
-                                                    user,
-                                                ]);
-                                            }}
-                                        >
-                                            <Avatar>
-                                                <AvatarImage
-                                                    src={user.avatar}
-                                                    alt="Image"
-                                                />
-                                                <AvatarFallback>
-                                                    {user.name[0]}
-                                                </AvatarFallback>
-                                            </Avatar>
-                                            <div className="ml-2">
-                                                <p className="text-sm font-medium leading-none">
-                                                    {user.name}
-                                                </p>
-                                                <p className="text-sm text-muted-foreground">
-                                                    {user.email}
-                                                </p>
-                                            </div>
-                                            {selectedUsers.includes(user) ? (
-                                                <Check className="ml-auto flex h-5 w-5 text-primary" />
-                                            ) : null}
-                                        </CommandItem>
-                                    ))}
+                                                    ) {
+                                                        return setSelectedUsers(
+                                                            selectedUsers.filter(
+                                                                (
+                                                                    selectedUser
+                                                                ) =>
+                                                                    selectedUser !==
+                                                                    user
+                                                            )
+                                                        );
+                                                    }
+                                                    return setSelectedUsers([
+                                                        ...selectedUsers,
+                                                        user,
+                                                    ]);
+                                                }}
+                                            >
+                                                <Avatar>
+                                                    <AvatarImage
+                                                        src={user.avatar}
+                                                        alt="Image"
+                                                    />
+                                                    <AvatarFallback>
+                                                        {user.name[0]}
+                                                    </AvatarFallback>
+                                                </Avatar>
+                                                <div className="ml-2">
+                                                    <p className="text-sm font-medium leading-none">
+                                                        {user.name}
+                                                    </p>
+                                                    <p className="text-sm text-muted-foreground">
+                                                        {user.email}
+                                                    </p>
+                                                </div>
+                                                {selectedUsers.includes(
+                                                    user
+                                                ) ? (
+                                                    <Check className="ml-auto flex h-5 w-5 text-primary" />
+                                                ) : null}
+                                            </CommandItem>
+                                        ))}
                                 </CommandGroup>
                             </CommandList>
                         </Command>
@@ -921,23 +1002,28 @@ export default function CardsChat() {
                         </DialogFooter>
                     </DialogContent>
                 </Dialog>
-                
+
                 {/* Dialog for Creating New Room */}
                 <Dialog open={createRoomOpen} onOpenChange={setCreateRoomOpen}>
                     <DialogContent className="gap-0 p-0 outline-none">
                         <DialogHeader className="px-4 pb-4 pt-5">
                             <DialogTitle>Create New Chat Room</DialogTitle>
                             <DialogDescription>
-                                Enter a name for your chat room and select members to add.
+                                Enter a name for your chat room and select
+                                members to add.
                             </DialogDescription>
                         </DialogHeader>
                         <div className="p-4 border-t">
                             <div className="mb-4">
-                                <label className="text-sm font-medium mb-1 block">Room Name</label>
+                                <label className="text-sm font-medium mb-1 block">
+                                    Room Name
+                                </label>
                                 <Input
                                     placeholder="Enter room name..."
                                     value={roomTitle}
-                                    onChange={(e) => setRoomTitle(e.target.value)}
+                                    onChange={(e) =>
+                                        setRoomTitle(e.target.value)
+                                    }
                                 />
                             </div>
                         </div>
@@ -951,10 +1037,16 @@ export default function CardsChat() {
                                             key={user.email}
                                             className="flex items-center px-2"
                                             onSelect={() => {
-                                                if (selectedMembers.includes(user.email)) {
+                                                if (
+                                                    selectedMembers.includes(
+                                                        user.email
+                                                    )
+                                                ) {
                                                     setSelectedMembers(
                                                         selectedMembers.filter(
-                                                            (email) => email !== user.email
+                                                            (email) =>
+                                                                email !==
+                                                                user.email
                                                         )
                                                     );
                                                 } else {
@@ -966,8 +1058,13 @@ export default function CardsChat() {
                                             }}
                                         >
                                             <Avatar>
-                                                <AvatarImage src={user.avatar} alt="Image" />
-                                                <AvatarFallback>{user.name[0]}</AvatarFallback>
+                                                <AvatarImage
+                                                    src={user.avatar}
+                                                    alt="Image"
+                                                />
+                                                <AvatarFallback>
+                                                    {user.name[0]}
+                                                </AvatarFallback>
                                             </Avatar>
                                             <div className="ml-2">
                                                 <p className="text-sm font-medium leading-none">
@@ -977,7 +1074,9 @@ export default function CardsChat() {
                                                     {user.email}
                                                 </p>
                                             </div>
-                                            {selectedMembers.includes(user.email) ? (
+                                            {selectedMembers.includes(
+                                                user.email
+                                            ) ? (
                                                 <Check className="ml-auto flex h-5 w-5 text-primary" />
                                             ) : null}
                                         </CommandItem>
@@ -988,7 +1087,10 @@ export default function CardsChat() {
                         <DialogFooter className="flex items-center border-t p-4 sm:justify-between">
                             {selectedMembers.length > 0 ? (
                                 <div className="text-sm">
-                                    <strong>{selectedMembers.length - 1}</strong> members selected
+                                    <strong>
+                                        {selectedMembers.length - 1}
+                                    </strong>{" "}
+                                    members selected
                                 </div>
                             ) : (
                                 <p className="text-sm text-muted-foreground">
@@ -996,7 +1098,9 @@ export default function CardsChat() {
                                 </p>
                             )}
                             <Button
-                                disabled={!roomTitle || selectedMembers.length < 2}
+                                disabled={
+                                    !roomTitle || selectedMembers.length < 2
+                                }
                                 onClick={handleCreateRoom}
                             >
                                 Create Room
@@ -1004,10 +1108,10 @@ export default function CardsChat() {
                         </DialogFooter>
                     </DialogContent>
                 </Dialog>
-                
+
                 {/* Dialog for Leaving Room Confirmation */}
-                <Dialog 
-                    open={leaveRoomDialogOpen} 
+                <Dialog
+                    open={leaveRoomDialogOpen}
                     onOpenChange={(isOpen) => {
                         // Only update state if the dialog is being closed (not opened)
                         if (!isOpen) {
@@ -1020,14 +1124,22 @@ export default function CardsChat() {
                         <DialogHeader>
                             <DialogTitle>Leave Chat Room</DialogTitle>
                             <DialogDescription>
-                                Are you sure you want to leave this chat room? You won't receive any more messages from this conversation.
+                                Are you sure you want to leave this chat room?
+                                You won't receive any more messages from this
+                                conversation.
                             </DialogDescription>
                         </DialogHeader>
                         <DialogFooter>
-                            <Button variant="outline" onClick={() => setLeaveRoomDialogOpen(false)}>
+                            <Button
+                                variant="outline"
+                                onClick={() => setLeaveRoomDialogOpen(false)}
+                            >
                                 Cancel
                             </Button>
-                            <Button variant="destructive" onClick={handleLeaveRoom}>
+                            <Button
+                                variant="destructive"
+                                onClick={handleLeaveRoom}
+                            >
                                 Leave Room
                             </Button>
                         </DialogFooter>
