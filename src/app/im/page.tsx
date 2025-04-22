@@ -58,6 +58,7 @@ import { useTheme } from "next-themes";
 import { emitTo, listen } from "@tauri-apps/api/event";
 import { resolve } from "path";
 import { parseJSON } from "date-fns";
+import { time, timeStamp } from "console";
 
 const ChatSkeleton = () => (
     <div className="space-y-4 p-4">
@@ -101,6 +102,31 @@ type User = (typeof users)[number];
 interface Message {
     role: string;
     content: string;
+    timestamp?: string;
+}
+
+function formatMessageTime(timestamp: string): string {
+    try {
+        const date = new Date(timestamp);
+        if (isToday(date)) {
+            // If the message is from today, show only the time
+            return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        } else {
+            // If the message is from another day, show date and time
+            return date.toLocaleDateString([], { month: 'short', day: 'numeric' }) + 
+                   ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        }
+    } catch (e) {
+        console.error("Error formatting timestamp:", e);
+        return "";
+    }
+}
+
+function isToday(date: Date): boolean {
+    const today = new Date();
+    return date.getDate() === today.getDate() &&
+        date.getMonth() === today.getMonth() &&
+        date.getFullYear() === today.getFullYear();
 }
 
 async function sendMessageToServer(
@@ -119,6 +145,7 @@ async function sendMessageToServer(
         content: content.trim(), // Ensure content is trimmed
         sender: user,
         roomId: chatRoom,
+        timestamp: new Date().toISOString(),
     };
 
     try {
@@ -384,6 +411,7 @@ export default function CardsChat() {
             const formattedMessages = messagesArray.map((item: any) => ({
                 role: item.sender === userName ? "user" : "agent",
                 content: item.content,
+                timestamp: item.timestamp || new Date().toISOString(),
             }));
 
             setMessages(formattedMessages);
@@ -498,6 +526,7 @@ export default function CardsChat() {
                                                 ? "user"
                                                 : "agent",
                                         content: parsedMsg.content,
+                                        timestamp: parsedMsg.timestamp || new Date().toISOString(),
                                     },
                                 ]);
 
@@ -781,8 +810,18 @@ export default function CardsChat() {
                                                                     : "bg-muted"
                                                             )}
                                                         >
-                                                            {message.content}
-                                                        </div>
+                                                            <div>{message.content}</div>
+                                                        {message.timestamp && (
+                                                            <div className={cn(
+                                                                "text-[0.65rem] self-end mt-1 opacity-70",
+                                                                message.role === "user" 
+                                                                    ? "text-primary-foreground" 
+                                                                    : "text-muted-foreground"
+                                                            )}>
+                                                                {formatMessageTime(message.timestamp)}
+                                                            </div>
+                                                        )}
+                                                    </div>
                                                     )
                                                 )}
                                                 <div ref={lastMessageRef} />
@@ -812,6 +851,7 @@ export default function CardsChat() {
                                                             role: "user",
                                                             content:
                                                                 messageText,
+                                                            timestamp: new Date().toISOString(),
                                                         } as any,
                                                     ]);
 
