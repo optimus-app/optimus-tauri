@@ -59,11 +59,11 @@ export default function Home() {
     }, []);
 
     return (
-        <>
-            <div className="grid items-center justify-items-center min-h-screen p-8 pb-20 sm:p-20 font-[family-name:var(--font-geist-sans)]">
+        <div className="flex flex-col items-center w-full p-4 font-[family-name:var(--font-geist-sans)]">
+            <div className="w-full max-w-md">
                 <CommandLineInput
                     onAction={handleAction}
-                    inputWidth="300px" // Set input width
+                    inputWidth="100%" // Make input take full width of container
                     groups={[
                         {
                             label: "Functions",
@@ -82,6 +82,6 @@ export default function Home() {
                     onOpenChange={setOpenCommandLine} // Allow external control of visibility
                 />
             </div>
-        </>
+        </div>
     );
 }
