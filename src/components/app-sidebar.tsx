@@ -77,6 +77,7 @@ export function AppSidebar({
 
     return (
         <Sidebar variant="floating" {...props}>
+            <div style={{ height: 20 }} />
             <SidebarHeader>
                 <SidebarMenu>
                     <SidebarMenuItem>
