@@ -55,7 +55,7 @@ async fn create_window(
             .build()
             .unwrap();
 
-        window.open_devtools();
+        // window.open_devtools();
         state.window_id += 1;
         window
     };
