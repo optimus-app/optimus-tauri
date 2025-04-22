@@ -7,7 +7,8 @@
     "im",
     "dashboard",
     "trade-exec",
-    "backtest"
+    "backtest",
+    "ml"
   ],
   "permissions": [
     "core:default",
