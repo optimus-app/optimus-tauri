@@ -97,6 +97,16 @@ jobs:
                   ref: main
                   fetch-depth: 0
 
+            - name: Setup Git
+              run: |
+                  git config --global user.name "GitHub Actions"
+                  git config --global user.email "actions@github.com"
+
+            - name: Pull latest changes with version bump
+              run: |
+                  # Make sure we have the latest changes including version bump
+                  git pull origin main
+
             - name: setup node
               uses: actions/setup-node@v4
               with:
@@ -108,10 +118,13 @@ jobs:
                   targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
             - name: install dependencies (ubuntu only)
-              if: matrix.platform == 'ubuntu-22.04' # This must match the platform value defined above.
+              if: matrix.platform == 'ubuntu-22.04'
               run: |
                   sudo apt-get update
                   sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+            - name: install frontend dependencies
+              run: npm install
 
             - name: transform URLs for production
               run: |
@@ -122,12 +135,6 @@ jobs:
                   fi
                   echo "Modified lib.rs for production build:"
                   cat src-tauri/src/lib.rs
-
-            - name: install frontend dependencies
-              run: npm install
-
-            - name: Pull latest changes with version bump
-              run: git pull origin main --rebase
 
             - uses: tauri-apps/tauri-action@v0
               env:
