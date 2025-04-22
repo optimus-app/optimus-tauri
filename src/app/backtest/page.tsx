@@ -46,6 +46,7 @@ if (typeof Highcharts !== "object") {
 }
 
 // Mock algorithms
+
 const algorithms = [
     {
         name: "Moving Average Crossover",
@@ -474,8 +475,8 @@ export default function BacktestingPage() {
 
         // Prepare series data for Highcharts
         const series = [];
-        const buySignals = [];
-        const sellSignals = [];
+        const buySignals: any[] = [];
+        const sellSignals: any[] = [];
         const buyLines = [];
         const sellLines = [];
 
@@ -721,9 +722,13 @@ export default function BacktestingPage() {
                                   style: {
                                       color: "#888",
                                   },
-                                  formatter: function () {
+                                  formatter: function (
+                                      this: Highcharts.AxisLabelsFormatterContextObject
+                                  ) {
                                       return (
-                                          (this.value * 100).toFixed(2) + "%"
+                                          (
+                                              (this.value as number) * 100
+                                          ).toFixed(2) + "%"
                                       );
                                   },
                               },

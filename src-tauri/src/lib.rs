@@ -46,6 +46,7 @@ async fn create_window(
 
         let window = tauri::WebviewWindowBuilder::new(&app, &window_id, webview_url.clone())
             .title(&name)
+            .decorations(false)
             .inner_size(1200.00, 800.00)
             .build()
             .unwrap();
@@ -148,7 +149,7 @@ pub fn run() {
             }
             app.manage(Mutex::new(AppState::default()));
             #[cfg(debug_assertions)]
-            // app.get_webview_window("main").unwrap().open_devtools();
+            app.get_webview_window("main").unwrap().open_devtools();
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![create_window, command_handling])

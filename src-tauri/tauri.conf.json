@@ -12,6 +12,7 @@
   "app": {
     "windows": [
       {
+        "decorations": false,
         "title": "optimus-tarui",
         "width": 600,
         "height": 300,
