@@ -40,13 +40,9 @@ import {
     CrosshairMode,
     LineStyle,
     IChartApi,
-    DeepPartial,
-    ChartOptions,
     SeriesMarker,
     Time,
     MouseEventParams,
-    ISeriesApi,
-    LineData,
 } from "lightweight-charts";
 
 // Define interfaces for strongly typed components

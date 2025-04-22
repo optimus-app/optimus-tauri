@@ -56,9 +56,6 @@ import HTTPRequestManager, { Methods } from "../utils/HTTPRequestManager";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useTheme } from "next-themes";
 import { emitTo, listen } from "@tauri-apps/api/event";
-import { resolve } from "path";
-import { parseJSON } from "date-fns";
-import { time, timeStamp } from "console";
 
 const ChatSkeleton = () => (
     <div className="space-y-4 p-4">

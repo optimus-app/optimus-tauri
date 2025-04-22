@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo, useRef } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { OrderHistoryTable } from "@/components/order-history-table";
 import { Slider } from "@/components/ui/slider";
 import { Input } from "@/components/ui/input";
@@ -107,7 +107,6 @@ export default function OrderEntryPage() {
 
     // WebSocket state
     const [isConnected, setIsConnected] = useState(false);
-    const [isWebSocketReady, setIsWebSocketReady] = useState(false);
 
     // Date range for order history
     const [startDate, setStartDate] = useState<Date | undefined>(

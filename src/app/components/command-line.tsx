@@ -4,7 +4,6 @@ import * as React from "react";
 import * as PopoverPrimitive from "@radix-ui/react-popover";
 import { Command as CommandPrimitive } from "cmdk";
 
-import { cn } from "@/lib/utils";
 import {
     Command,
     CommandEmpty,
@@ -29,7 +28,6 @@ export function CommandLineInput({
     onOpenChange?: (open: boolean) => void;
 }) {
     const [search, setSearch] = React.useState("");
-    const [value, setValue] = React.useState("");
     const inputRef = React.useRef<HTMLInputElement>(null);
 
     const parseCommandLine = (input: string) => {
