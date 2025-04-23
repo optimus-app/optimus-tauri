@@ -107,11 +107,23 @@ function formatMessageTime(timestamp: string): string {
         const date = new Date(timestamp);
         if (isToday(date)) {
             // If the message is from today, show only the time
-            return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            return date.toLocaleTimeString([], {
+                hour: "2-digit",
+                minute: "2-digit",
+            });
         } else {
             // If the message is from another day, show date and time
-            return date.toLocaleDateString([], { month: 'short', day: 'numeric' }) + 
-                   ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            return (
+                date.toLocaleDateString([], {
+                    month: "short",
+                    day: "numeric",
+                }) +
+                " " +
+                date.toLocaleTimeString([], {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                })
+            );
         }
     } catch (e) {
         console.error("Error formatting timestamp:", e);
@@ -121,9 +133,11 @@ function formatMessageTime(timestamp: string): string {
 
 function isToday(date: Date): boolean {
     const today = new Date();
-    return date.getDate() === today.getDate() &&
+    return (
+        date.getDate() === today.getDate() &&
         date.getMonth() === today.getMonth() &&
-        date.getFullYear() === today.getFullYear();
+        date.getFullYear() === today.getFullYear()
+    );
 }
 
 async function sendMessageToServer(
@@ -491,7 +505,7 @@ export default function CardsChat() {
 
     // --- Set up WebSocket for messages ---
     useEffect(() => {
-        if (!isChatDataReady) return;
+        // if (!isChatDataReady) return;
 
         const initWebSocket = async () => {
             try {
@@ -500,45 +514,84 @@ export default function CardsChat() {
                     "ws://localhost:8080/connect/chat",
                     ProtocolType.STOMP
                 );
+
+                // In your useEffect for WebSocket messages
+
+                // WebSocket message handler that prevents duplicates
                 wsManager.addSubscriptionToConnection(
                     CHAT_WS_CONNECTION_ID,
                     `/subscribe/chat/messages/${userName}`,
                     (msg: any) => {
-                        console.log("Received webscket");
+                        console.log("Received websocket message:", msg);
                         const parsedMsg = JSON.parse(msg);
                         if (
                             parsedMsg &&
                             parsedMsg.content &&
                             typeof parsedMsg.content === "string" &&
-                            parsedMsg.content.trim() !== "" &&
-                            parsedMsg.roomId !== undefined
+                            parsedMsg.content.trim() !== ""
                         ) {
-                            // Only add message to UI if it belongs to the currently active chat room
-                            if (parsedMsg.roomId === activeChatId) {
-                                setMessages((prev) => [
-                                    ...prev,
-                                    {
-                                        role:
-                                            parsedMsg.sender === userName
-                                                ? "user"
-                                                : "agent",
-                                        content: parsedMsg.content,
-                                        timestamp: parsedMsg.timestamp || new Date().toISOString(),
-                                    },
-                                ]);
+                            // Check if this is a message from the current user
+                            const isOwnMessage = parsedMsg.sender === userName;
 
-                                setTimeout(() => {
-                                    if (lastMessageRef.current) {
-                                        lastMessageRef.current.scrollIntoView({
-                                            behavior: "smooth",
-                                            block: "end",
-                                        });
-                                    }
-                                }, 100);
+                            // First check if we need to update activeChatId
+                            if (activeChatId === null && parsedMsg.roomId) {
+                                console.log(
+                                    "Setting active chat from websocket message:",
+                                    parsedMsg.roomId
+                                );
+                                setActiveChatId(parsedMsg.roomId);
+
+                                // Also load chat messages for this room
+                                loadChatMessages(parsedMsg.roomId);
+
+                                // Only add this message if it's not from the current user
+                                // (prevents duplicates with the optimistic update)
+                                if (!isOwnMessage) {
+                                    setMessages((prev) => [
+                                        ...prev,
+                                        {
+                                            role: "agent",
+                                            content: parsedMsg.content,
+                                            timestamp:
+                                                parsedMsg.timestamp ||
+                                                new Date().toISOString(),
+                                        },
+                                    ]);
+                                }
+                            }
+                            // Then handle the normal case where roomId matches activeChatId
+                            else if (parsedMsg.roomId === activeChatId) {
+                                // Skip adding our own messages that come back through websocket
+                                // as they've already been added through optimistic updates
+                                if (!isOwnMessage) {
+                                    setMessages((prev) => [
+                                        ...prev,
+                                        {
+                                            role: "agent",
+                                            content: parsedMsg.content,
+                                            timestamp:
+                                                parsedMsg.timestamp ||
+                                                new Date().toISOString(),
+                                        },
+                                    ]);
+
+                                    // Scroll to bottom
+                                    setTimeout(() => {
+                                        if (lastMessageRef.current) {
+                                            lastMessageRef.current.scrollIntoView(
+                                                {
+                                                    behavior: "smooth",
+                                                    block: "end",
+                                                }
+                                            );
+                                        }
+                                    }, 100);
+                                }
                             } else {
                                 console.log(
                                     `Received message for room ${parsedMsg.roomId}, but currently in room ${activeChatId}`
                                 );
+                                // You could also add a notification here for messages in other rooms
                             }
                         } else {
                             console.warn(
@@ -572,7 +625,7 @@ export default function CardsChat() {
             wsManager.disconnect();
             setIsWebSocketReady(false);
         };
-    }, [isChatDataReady, wsManager]);
+    }, [isChatDataReady, wsManager, activeChatId]);
 
     // --- Set up Tauri event listeners ---
     useEffect(() => {
@@ -807,18 +860,27 @@ export default function CardsChat() {
                                                                     : "bg-muted"
                                                             )}
                                                         >
-                                                            <div>{message.content}</div>
-                                                        {message.timestamp && (
-                                                            <div className={cn(
-                                                                "text-[0.65rem] self-end mt-1 opacity-70",
-                                                                message.role === "user" 
-                                                                    ? "text-primary-foreground" 
-                                                                    : "text-muted-foreground"
-                                                            )}>
-                                                                {formatMessageTime(message.timestamp)}
+                                                            <div>
+                                                                {
+                                                                    message.content
+                                                                }
                                                             </div>
-                                                        )}
-                                                    </div>
+                                                            {message.timestamp && (
+                                                                <div
+                                                                    className={cn(
+                                                                        "text-[0.65rem] self-end mt-1 opacity-70",
+                                                                        message.role ===
+                                                                            "user"
+                                                                            ? "text-primary-foreground"
+                                                                            : "text-muted-foreground"
+                                                                    )}
+                                                                >
+                                                                    {formatMessageTime(
+                                                                        message.timestamp
+                                                                    )}
+                                                                </div>
+                                                            )}
+                                                        </div>
                                                     )
                                                 )}
                                                 <div ref={lastMessageRef} />
@@ -848,7 +910,8 @@ export default function CardsChat() {
                                                             role: "user",
                                                             content:
                                                                 messageText,
-                                                            timestamp: new Date().toISOString(),
+                                                            timestamp:
+                                                                new Date().toISOString(),
                                                         } as any,
                                                     ]);
 
