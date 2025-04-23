@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { format } from "date-fns";
-import { CalendarIcon } from "lucide-react";
+import { CalendarIcon, Plus, Minus, RefreshCw } from "lucide-react";
 import { useTheme } from "next-themes";
 import WebSocketManager, { ProtocolType } from "@/app/utils/WebSocketManager";
 import HTTPRequestManager, { Methods } from "@/app/utils/HTTPRequestManager";
@@ -49,6 +49,19 @@ interface Order {
     currency?: string;
     // Additional fields for local state management
     timestamp?: Date;
+}
+
+// Updated Position interface to match actual API response
+interface Position {
+    code: string;
+    quantity: number; // Changed from qty
+    avg_price: number; // Changed from cost_price
+    market_value: number;
+    unrealized_pl: number; // Changed from pl_val
+    pl_ratio: number;
+    // Optional fields in case they're missing
+    can_sell_qty?: number;
+    nominal_price?: number;
 }
 
 // Strategy options
@@ -85,6 +98,36 @@ const STOCKS = {
     ],
 };
 
+// Fetch current stock position and quote
+const fetchStockPosition = async (
+    code: string,
+    httpManager: HTTPRequestManager
+) => {
+    try {
+        const response = await httpManager.handleRequest(
+            "api/v1/market/positions",
+            Methods.POST,
+            {
+                trd_mkt: code.split(".")[0],
+                refresh_cache: true,
+            },
+            "orders-server"
+        );
+
+        if (response && Array.isArray(response)) {
+            // Find the position for the specified stock code with non-zero quantity
+            const position = response.find(
+                (pos: Position) => pos.code === code && pos.quantity > 0
+            );
+            return position || null;
+        }
+        return null;
+    } catch (error) {
+        console.error("Error fetching stock position:", error);
+        return null;
+    }
+};
+
 export default function OrderEntryPage() {
     const { toast } = useToast();
     // Get singleton instances of managers
@@ -95,10 +138,14 @@ export default function OrderEntryPage() {
     // Order state
     const [activeOrders, setActiveOrders] = useState<Order[]>([]);
     const [historicalOrders, setHistoricalOrders] = useState<Order[]>([]);
-    const [bid, setBid] = useState(145.75);
-    const [ask, setAsk] = useState(146.68);
+    const [bid, setBid] = useState(475.7); // Default as requested
+    const [ask, setAsk] = useState(477.7); // Default as requested
     const [position, setPosition] = useState(50);
     const [quantity, setQuantity] = useState(100);
+    const [currentPosition, setCurrentPosition] = useState<Position | null>(
+        null
+    );
+    const [isLoadingQuote, setIsLoadingQuote] = useState(false);
 
     // Selection state
     const [market, setMarket] = useState("HK");
@@ -128,9 +175,78 @@ export default function OrderEntryPage() {
         // Rest of your initialization code
     }, [httpManager]);
 
+    // Fetch position and quote when stock changes
+    useEffect(() => {
+        fetchCurrentPositionAndQuote(selectedStock);
+    }, [selectedStock, httpManager]);
+
+    // Fetch current position and set prices based on nominal price
+    const fetchCurrentPositionAndQuote = async (stockCode: string) => {
+        setIsLoadingQuote(true);
+        try {
+            // Fetch position data
+            const positionData = await fetchStockPosition(
+                stockCode,
+                httpManager
+            );
+
+            if (positionData) {
+                setCurrentPosition(positionData);
+
+                // Set bid/ask prices based on the avg_price from position data if available
+                // Otherwise, keep the current prices
+                if (positionData.avg_price && positionData.avg_price > 0) {
+                    const avgPrice = positionData.avg_price;
+                    const spreadPercentage = 0.002; // 0.2% spread
+                    const spreadAmount = avgPrice * spreadPercentage;
+
+                    setBid(parseFloat((avgPrice - spreadAmount).toFixed(2)));
+                    setAsk(parseFloat((avgPrice + spreadAmount).toFixed(2)));
+
+                    // Reset position to midpoint
+                    setPosition(50);
+                }
+            } else {
+                // If no position data, use default values
+                // For HK.00700, use the specified defaults
+                if (stockCode === "HK.00700") {
+                    setBid(475.7);
+                    setAsk(477.7);
+                } else {
+                    // Otherwise simulate some reasonable prices
+                    const stockIndex =
+                        STOCKS[
+                            stockCode.split(".")[0] as keyof typeof STOCKS
+                        ]?.findIndex((stock) => stock.code === stockCode) || 0;
+
+                    const basePrice = 100 + stockIndex * 10;
+                    setBid(basePrice - 0.5);
+                    setAsk(basePrice + 0.5);
+                }
+                setPosition(50);
+            }
+        } catch (error) {
+            console.error("Error fetching position:", error);
+            toast({
+                title: "Data Error",
+                description: "Unable to fetch current position",
+                variant: "destructive",
+            });
+        } finally {
+            setIsLoadingQuote(false);
+        }
+    };
+
+    // Functions to adjust bid and ask
+    const adjustBid = (amount: number) => {
+        setBid((prev) => Math.max(0, parseFloat((prev + amount).toFixed(2))));
+    };
+
+    const adjustAsk = (amount: number) => {
+        setAsk((prev) => Math.max(0, parseFloat((prev + amount).toFixed(2))));
+    };
+
     // Fetch historical orders
-    // Fetch historical orders with timezone handling
-    // Fetch historical orders with timezone handling
     const fetchOrderHistory = async () => {
         if (!startDate || !endDate) return;
 
@@ -197,7 +313,6 @@ export default function OrderEntryPage() {
         }
     };
 
-    // WebSocket connection for order updates
     // WebSocket connection for order updates
     useEffect(() => {
         const initWebSocket = async () => {
@@ -337,8 +452,15 @@ export default function OrderEntryPage() {
         setMarket(value);
         // Set the first stock of selected market as default
         if (STOCKS[value as keyof typeof STOCKS]?.length > 0) {
-            setSelectedStock(STOCKS[value as keyof typeof STOCKS][0].code);
+            const firstStock = STOCKS[value as keyof typeof STOCKS][0].code;
+            setSelectedStock(firstStock);
         }
+    };
+
+    // Handle stock change
+    const handleStockChange = (value: string) => {
+        setSelectedStock(value);
+        fetchCurrentPositionAndQuote(value);
     };
 
     // Handle order submission
@@ -521,7 +643,7 @@ export default function OrderEntryPage() {
                             <label className="text-sm font-medium">Stock</label>
                             <Select
                                 value={selectedStock}
-                                onValueChange={setSelectedStock}
+                                onValueChange={handleStockChange}
                             >
                                 <SelectTrigger>
                                     <SelectValue placeholder="Select stock" />
@@ -541,6 +663,61 @@ export default function OrderEntryPage() {
                             </Select>
                         </div>
                     </div>
+
+                    {/* Current Position Information - With null checks */}
+                    {currentPosition && (
+                        <div className="p-3 bg-muted rounded-md">
+                            <h3 className="text-sm font-semibold mb-2">
+                                Current Position
+                            </h3>
+                            <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+                                <div>
+                                    Quantity:{" "}
+                                    <span className="font-medium">
+                                        {currentPosition.quantity}
+                                    </span>
+                                </div>
+                                <div>
+                                    Available to Sell:{" "}
+                                    <span className="font-medium">
+                                        {currentPosition.can_sell_qty ??
+                                            currentPosition.quantity}
+                                    </span>
+                                </div>
+                                <div>
+                                    Cost Basis:{" "}
+                                    <span className="font-medium">
+                                        ${currentPosition.avg_price.toFixed(2)}
+                                    </span>
+                                </div>
+                                <div>
+                                    Market Value:{" "}
+                                    <span className="font-medium">
+                                        $
+                                        {currentPosition.market_value.toFixed(
+                                            2
+                                        )}
+                                    </span>
+                                </div>
+                                <div>
+                                    P&L:{" "}
+                                    <span
+                                        className={`font-medium ${
+                                            currentPosition.unrealized_pl >= 0
+                                                ? "text-green-500"
+                                                : "text-red-500"
+                                        }`}
+                                    >
+                                        $
+                                        {currentPosition.unrealized_pl.toFixed(
+                                            2
+                                        )}{" "}
+                                        ({currentPosition.pl_ratio.toFixed(2)}%)
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                    )}
 
                     {/* Strategy Selection */}
                     <div className="space-y-2">
@@ -608,12 +785,32 @@ export default function OrderEntryPage() {
                         </div>
                         <div className="grid grid-cols-2 gap-4">
                             <div className="space-y-2">
-                                <label
-                                    htmlFor="bid"
-                                    className="text-sm font-medium"
-                                >
-                                    Bid
-                                </label>
+                                <div className="flex justify-between items-center">
+                                    <label
+                                        htmlFor="bid"
+                                        className="text-sm font-medium"
+                                    >
+                                        Bid
+                                    </label>
+                                    <div className="flex space-x-1">
+                                        <Button
+                                            size="icon"
+                                            variant="outline"
+                                            className="h-6 w-6"
+                                            onClick={() => adjustBid(-0.01)}
+                                        >
+                                            <Minus className="h-3 w-3" />
+                                        </Button>
+                                        <Button
+                                            size="icon"
+                                            variant="outline"
+                                            className="h-6 w-6"
+                                            onClick={() => adjustBid(0.01)}
+                                        >
+                                            <Plus className="h-3 w-3" />
+                                        </Button>
+                                    </div>
+                                </div>
                                 <Input
                                     id="bid"
                                     type="number"
@@ -626,12 +823,32 @@ export default function OrderEntryPage() {
                                 />
                             </div>
                             <div className="space-y-2">
-                                <label
-                                    htmlFor="ask"
-                                    className="text-sm font-medium"
-                                >
-                                    Ask
-                                </label>
+                                <div className="flex justify-between items-center">
+                                    <label
+                                        htmlFor="ask"
+                                        className="text-sm font-medium"
+                                    >
+                                        Ask
+                                    </label>
+                                    <div className="flex space-x-1">
+                                        <Button
+                                            size="icon"
+                                            variant="outline"
+                                            className="h-6 w-6"
+                                            onClick={() => adjustAsk(-0.01)}
+                                        >
+                                            <Minus className="h-3 w-3" />
+                                        </Button>
+                                        <Button
+                                            size="icon"
+                                            variant="outline"
+                                            className="h-6 w-6"
+                                            onClick={() => adjustAsk(0.01)}
+                                        >
+                                            <Plus className="h-3 w-3" />
+                                        </Button>
+                                    </div>
+                                </div>
                                 <Input
                                     id="ask"
                                     type="number"
@@ -643,6 +860,24 @@ export default function OrderEntryPage() {
                                     className="w-full bg-input text-foreground"
                                 />
                             </div>
+                        </div>
+                        <div className="flex justify-center">
+                            <Button
+                                variant="secondary"
+                                size="sm"
+                                className="flex items-center"
+                                onClick={() =>
+                                    fetchCurrentPositionAndQuote(selectedStock)
+                                }
+                                disabled={isLoadingQuote}
+                            >
+                                <RefreshCw
+                                    className={`h-4 w-4 mr-2 ${
+                                        isLoadingQuote ? "animate-spin" : ""
+                                    }`}
+                                />
+                                Refresh Position Data
+                            </Button>
                         </div>
                     </div>
 
