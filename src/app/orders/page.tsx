@@ -21,15 +21,22 @@ import {
 } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { format } from "date-fns";
-import { CalendarIcon } from "lucide-react";
+import {
+    CalendarIcon,
+    Plus,
+    Minus,
+    RefreshCw,
+    AlertCircle,
+} from "lucide-react";
 import { useTheme } from "next-themes";
 import WebSocketManager, { ProtocolType } from "@/app/utils/WebSocketManager";
 import HTTPRequestManager, { Methods } from "@/app/utils/HTTPRequestManager";
 import { ActiveOrdersTable } from "@/components/active-orders-table";
-// Add these imports at the top of your file
 import { useToast } from "@/hooks/use-toast";
 import { ToastAction } from "@/components/ui/toast";
 import { Toaster } from "@/components/ui/toaster";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Progress } from "@/components/ui/progress";
 
 // Extended Order interface to match API response
 interface Order {
@@ -49,6 +56,33 @@ interface Order {
     currency?: string;
     // Additional fields for local state management
     timestamp?: Date;
+}
+
+// Updated Position interface to match actual API response
+interface Position {
+    code: string;
+    quantity: number;
+    avg_price: number;
+    market_value: number;
+    unrealized_pl: number;
+    pl_ratio: number;
+    // Optional fields in case they're missing
+    can_sell_qty?: number;
+    nominal_price?: number;
+}
+
+// Order book level interface
+interface OrderBookLevel {
+    price: number;
+    volume: number;
+}
+
+// Order book data interface
+interface OrderBookData {
+    code: string;
+    timestamp: string;
+    bid: OrderBookLevel[];
+    ask: OrderBookLevel[];
 }
 
 // Strategy options
@@ -85,20 +119,241 @@ const STOCKS = {
     ],
 };
 
+// Fetch current stock position and quote
+const fetchStockPosition = async (
+    code: string,
+    httpManager: HTTPRequestManager
+) => {
+    try {
+        const response = await httpManager.handleRequest(
+            "api/v1/market/positions",
+            Methods.POST,
+            {
+                trd_mkt: code.split(".")[0],
+                refresh_cache: true,
+            },
+            "orders-server"
+        );
+
+        if (response && Array.isArray(response)) {
+            // Find the position for the specified stock code with non-zero quantity
+            const position = response.find(
+                (pos: Position) => pos.code === code && pos.quantity > 0
+            );
+            return position || null;
+        }
+        return null;
+    } catch (error) {
+        console.error("Error fetching stock position:", error);
+        return null;
+    }
+};
+
+// Order Book display component
+// Replace the OrderBookDisplay component with this implementation
+
+const OrderBookDisplay = ({
+    orderBookData,
+    isLoading,
+    onPriceSelect,
+}: {
+    orderBookData: OrderBookData | null;
+    isLoading: boolean;
+    onPriceSelect: (price: number) => void;
+}) => {
+    // Find max volume for display scaling
+    const maxVolume = useMemo(() => {
+        if (!orderBookData) return 1000;
+
+        const allVolumes = [
+            ...(orderBookData.bid?.map((item) => item.volume) || []),
+            ...(orderBookData.ask?.map((item) => item.volume) || []),
+        ];
+
+        return Math.max(...allVolumes, 1000);
+    }, [orderBookData]);
+
+    if (isLoading) {
+        return (
+            <div className="flex flex-col items-center justify-center p-8 space-y-4">
+                <RefreshCw className="h-8 w-8 animate-spin text-muted-foreground" />
+                <p className="text-sm text-muted-foreground">
+                    Loading order book data...
+                </p>
+            </div>
+        );
+    }
+
+    if (!orderBookData) {
+        return (
+            <Alert className="my-4">
+                <AlertCircle className="h-4 w-4" />
+                <AlertTitle>Order Book Not Available</AlertTitle>
+                <AlertDescription>
+                    No order book data is available for this stock. This may be
+                    due to market hours or connectivity issues.
+                </AlertDescription>
+            </Alert>
+        );
+    }
+
+    // Calculate time ago from timestamp
+    const getTimeAgo = (timestamp: string) => {
+        const date = new Date(timestamp);
+        const now = new Date();
+        const diffMs = now.getTime() - date.getTime();
+        const diffSec = Math.floor(diffMs / 1000);
+
+        if (diffSec < 60) return `${diffSec}s ago`;
+        if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m ago`;
+        return `${Math.floor(diffSec / 3600)}h ago`;
+    };
+
+    const timeAgo = orderBookData.timestamp
+        ? getTimeAgo(orderBookData.timestamp)
+        : "unknown";
+
+    // Format number with k/m suffixes
+    const formatNumber = (num: number) => {
+        if (num >= 1000000) {
+            return (num / 1000000).toFixed(2) + "m";
+        }
+        if (num >= 1000) {
+            return (num / 1000).toFixed(2) + "k";
+        }
+        return num.toString();
+    };
+
+    // Get asks (sells) in reverse order (highest to lowest)
+    const asks = [...(orderBookData.ask || [])].slice(0, 5).reverse();
+
+    // Get bids (buys) in order (highest to lowest)
+    const bids = [...(orderBookData.bid || [])].slice(0, 5);
+
+    return (
+        <div className="flex flex-col">
+            {/* Header row */}
+            <div className="grid grid-cols-4 text-xs font-medium text-muted-foreground border-b pb-1 mb-1">
+                <div>PRICE</div>
+                <div className="text-right">SIZE</div>
+                <div className="text-right">BUYS</div>
+                <div className="text-right">SELLS</div>
+            </div>
+
+            {/* Ask/Sell Rows */}
+            <div className="mb-2">
+                {asks.map((level, index) => (
+                    <div
+                        key={`ask-${index}`}
+                        className="grid grid-cols-4 py-0.5 cursor-pointer hover:bg-muted/30 text-sm bg-red-900/20"
+                        onClick={() => onPriceSelect(level.price)}
+                    >
+                        <div className="text-red-400 font-medium">
+                            {level.price.toFixed(2)}
+                        </div>
+                        <div className="text-right">
+                            {formatNumber(level.volume)}
+                        </div>
+                        <div className="text-right text-green-400">-</div>
+                        <div className="text-right text-red-400">
+                            {formatNumber(level.volume)}
+                        </div>
+                    </div>
+                ))}
+                {asks.length === 0 && (
+                    <div className="text-sm text-muted-foreground italic py-2 text-center">
+                        No ask data available
+                    </div>
+                )}
+            </div>
+
+            {/* Spread/Mid Price */}
+            <div className="text-center py-1 text-xs text-muted-foreground border-y">
+                {orderBookData.ask &&
+                orderBookData.ask.length > 0 &&
+                orderBookData.bid &&
+                orderBookData.bid.length > 0 ? (
+                    <>
+                        {/* Calculate and display the spread */}
+                        Spread: $
+                        {(
+                            orderBookData.ask[0].price -
+                            orderBookData.bid[0].price
+                        ).toFixed(2)}
+                        (
+                        {(
+                            ((orderBookData.ask[0].price -
+                                orderBookData.bid[0].price) /
+                                orderBookData.bid[0].price) *
+                            100
+                        ).toFixed(2)}
+                        %)
+                    </>
+                ) : (
+                    "No spread data"
+                )}
+            </div>
+
+            {/* Bid/Buy Rows */}
+            <div className="mt-2">
+                {bids.map((level, index) => (
+                    <div
+                        key={`bid-${index}`}
+                        className="grid grid-cols-4 py-0.5 cursor-pointer hover:bg-muted/30 text-sm bg-blue-900/20"
+                        onClick={() => onPriceSelect(level.price)}
+                    >
+                        <div className="text-green-400 font-medium">
+                            {level.price.toFixed(2)}
+                        </div>
+                        <div className="text-right">
+                            {formatNumber(level.volume)}
+                        </div>
+                        <div className="text-right text-green-400">
+                            {formatNumber(level.volume)}
+                        </div>
+                        <div className="text-right text-red-400">-</div>
+                    </div>
+                ))}
+                {bids.length === 0 && (
+                    <div className="text-sm text-muted-foreground italic py-2 text-center">
+                        No bid data available
+                    </div>
+                )}
+            </div>
+
+            {/* Timestamp */}
+            <div className="text-xs text-muted-foreground text-right mt-2">
+                Last updated: {timeAgo}
+            </div>
+        </div>
+    );
+};
+
 export default function OrderEntryPage() {
     const { toast } = useToast();
     // Get singleton instances of managers
     const wsManager = useMemo(() => WebSocketManager.getInstance(), []);
     const httpManager = useMemo(() => HTTPRequestManager.getInstance(), []);
     const ORDERS_WS_CONNECTION_ID = "orders-connection";
+    const ORDERBOOK_WS_CONNECTION_ID = "orderbook-connection";
 
     // Order state
     const [activeOrders, setActiveOrders] = useState<Order[]>([]);
     const [historicalOrders, setHistoricalOrders] = useState<Order[]>([]);
-    const [bid, setBid] = useState(145.75);
-    const [ask, setAsk] = useState(146.68);
+    const [bid, setBid] = useState(475.7); // Default
+    const [ask, setAsk] = useState(477.7); // Default
     const [position, setPosition] = useState(50);
     const [quantity, setQuantity] = useState(100);
+    const [currentPosition, setCurrentPosition] = useState<Position | null>(
+        null
+    );
+    const [isLoadingQuote, setIsLoadingQuote] = useState(false);
+
+    // Order book state
+    const [orderBookData, setOrderBookData] = useState<OrderBookData | null>(
+        null
+    );
+    const [isLoadingOrderBook, setIsLoadingOrderBook] = useState(false);
 
     // Selection state
     const [market, setMarket] = useState("HK");
@@ -107,6 +362,7 @@ export default function OrderEntryPage() {
 
     // WebSocket state
     const [isConnected, setIsConnected] = useState(false);
+    const [isOrderBookConnected, setIsOrderBookConnected] = useState(false);
 
     // Date range for order history
     const [startDate, setStartDate] = useState<Date | undefined>(
@@ -128,9 +384,210 @@ export default function OrderEntryPage() {
         // Rest of your initialization code
     }, [httpManager]);
 
+    // Fetch position and quote when stock changes
+    useEffect(() => {
+        fetchCurrentPositionAndQuote(selectedStock);
+        setupOrderBookSubscription(selectedStock);
+    }, [selectedStock, httpManager, wsManager]);
+
+    // Update the setupOrderBookSubscription function to fix the getConnection issue
+
+    // Setup order book WebSocket subscription
+    const setupOrderBookSubscription = async (stockCode: string) => {
+        setIsLoadingOrderBook(true);
+        setOrderBookData(null);
+
+        try {
+            // Close any existing connection
+            try {
+                await wsManager.disconnectConnection(
+                    ORDERBOOK_WS_CONNECTION_ID
+                );
+            } catch (error) {
+                // Ignore error, connection might not exist yet
+            }
+
+            // Add a new connection for order book - using the correct endpoint from backend
+            wsManager.addConnection(
+                ORDERBOOK_WS_CONNECTION_ID,
+                "ws://localhost:9000/ws/orderbook", // Updated path to match backend
+                ProtocolType.RAW
+            );
+
+            // Set up a message handler for the connection
+            wsManager.addSubscriptionToConnection(
+                ORDERBOOK_WS_CONNECTION_ID,
+                "message",
+                (msg: string) => {
+                    try {
+                        const data = JSON.parse(msg);
+                        console.log(`Order Book Update:`, data);
+
+                        // Check if this is an order book update for our stock
+                        if (
+                            data.type === "order_book_update" &&
+                            data.code === stockCode
+                        ) {
+                            // Transform the data to match the expected structure
+                            const transformedData = {
+                                code: data.code,
+                                timestamp: data.timestamp,
+                                bid: data.bid.map((item: any[]) => ({
+                                    price: item[0],
+                                    volume: item[1],
+                                })),
+                                ask: data.ask.map((item: any[]) => ({
+                                    price: item[0],
+                                    volume: item[1],
+                                })),
+                            };
+
+                            setOrderBookData(transformedData);
+                            setIsLoadingOrderBook(false);
+
+                            // If we get order book data with valid bid/ask prices, update the form values
+                            if (data.bid?.length > 0 && data.ask?.length > 0) {
+                                const topBid = data.bid[0][0]; // First element is price
+                                const topAsk = data.ask[0][0]; // First element is price
+
+                                if (topBid > 0 && topAsk > 0) {
+                                    setBid(topBid);
+                                    setAsk(topAsk);
+                                }
+                            }
+                        }
+                    } catch (error) {
+                        console.error(
+                            "Error processing order book message:",
+                            error
+                        );
+                    }
+                }
+            );
+
+            await wsManager.startConnection(ORDERBOOK_WS_CONNECTION_ID);
+            setIsOrderBookConnected(true);
+
+            // Set up ping interval to keep the connection alive
+            const pingInterval = setInterval(async () => {
+                try {
+                    // Use sendMessage instead of getConnection to send ping
+                    if (isOrderBookConnected) {
+                        await wsManager.sendMessage(
+                            ORDERBOOK_WS_CONNECTION_ID,
+                            "ping"
+                        );
+                    } else {
+                        clearInterval(pingInterval);
+                    }
+                } catch (error) {
+                    console.error("Error sending ping:", error);
+                    clearInterval(pingInterval);
+                }
+            }, 30000); // Send ping every 30 seconds
+
+            // After 5 seconds, if no order book data is received, consider it unavailable
+            setTimeout(() => {
+                setIsLoadingOrderBook(false);
+            }, 5000);
+
+            // Return a cleanup function
+            return () => {
+                clearInterval(pingInterval);
+            };
+        } catch (error) {
+            console.error("OrderBook WebSocket initialization failed:", error);
+            setIsOrderBookConnected(false);
+            setIsLoadingOrderBook(false);
+
+            // Return an empty function for consistent return type
+            return () => {};
+        }
+    };
+
+    // Handle price selection from order book
+    const handlePriceSelect = (price: number) => {
+        // Calculate what position this price represents between bid and ask
+        if (price <= bid) {
+            // If at or below bid, set to 0
+            setPosition(0);
+        } else if (price >= ask) {
+            // If at or above ask, set to 100
+            setPosition(100);
+        } else {
+            // Calculate position percentage between bid and ask
+            const positionPercent = ((price - bid) / (ask - bid)) * 100;
+            setPosition(Math.round(positionPercent));
+        }
+    };
+
+    // Fetch current position and set prices based on nominal price
+    const fetchCurrentPositionAndQuote = async (stockCode: string) => {
+        setIsLoadingQuote(true);
+        try {
+            // Fetch position data
+            const positionData = await fetchStockPosition(
+                stockCode,
+                httpManager
+            );
+
+            if (positionData) {
+                setCurrentPosition(positionData);
+
+                // Set bid/ask prices based on the avg_price from position data if available
+                // Otherwise, keep the current prices
+                if (positionData.avg_price && positionData.avg_price > 0) {
+                    const avgPrice = positionData.avg_price;
+                    const spreadPercentage = 0.002; // 0.2% spread
+                    const spreadAmount = avgPrice * spreadPercentage;
+
+                    setBid(parseFloat((avgPrice - spreadAmount).toFixed(2)));
+                    setAsk(parseFloat((avgPrice + spreadAmount).toFixed(2)));
+
+                    // Reset position to midpoint
+                    setPosition(50);
+                }
+            } else {
+                // If no position data, use default values
+                // For HK.00700, use the specified defaults
+                if (stockCode === "HK.00700") {
+                    setBid(475.7);
+                    setAsk(477.7);
+                } else {
+                    // Otherwise simulate some reasonable prices
+                    const stockIndex =
+                        STOCKS[
+                            stockCode.split(".")[0] as keyof typeof STOCKS
+                        ]?.findIndex((stock) => stock.code === stockCode) || 0;
+
+                    const basePrice = 100 + stockIndex * 10;
+                    setBid(basePrice - 0.5);
+                    setAsk(basePrice + 0.5);
+                }
+                setPosition(50);
+            }
+        } catch (error) {
+            console.error("Error fetching position:", error);
+            toast({
+                title: "Data Error",
+                description: "Unable to fetch current position",
+                variant: "destructive",
+            });
+        } finally {
+            setIsLoadingQuote(false);
+        }
+    };
+
+    // Functions to adjust bid and ask
+    const adjustBid = (amount: number) => {
+        setBid((prev) => Math.max(0, parseFloat((prev + amount).toFixed(2))));
+    };
+
+    const adjustAsk = (amount: number) => {
+        setAsk((prev) => Math.max(0, parseFloat((prev + amount).toFixed(2))));
+    };
+
     // Fetch historical orders
-    // Fetch historical orders with timezone handling
-    // Fetch historical orders with timezone handling
     const fetchOrderHistory = async () => {
         if (!startDate || !endDate) return;
 
@@ -178,7 +635,7 @@ export default function OrderEntryPage() {
 
                 response.orders.forEach((order: Order) => {
                     if (
-                        ["FILLED", "CANCELLED_ALL", "FAILED"].includes(
+                        ["FILLED_ALL", "CANCELLED_ALL", "FAILED"].includes(
                             order.order_status
                         )
                     ) {
@@ -198,7 +655,12 @@ export default function OrderEntryPage() {
     };
 
     // WebSocket connection for order updates
-    // WebSocket connection for order updates
+    // Update the cleanup in the WebSocket useEffect
+
+    // Update the cleanup in the WebSocket useEffect
+
+    // Fix the WebSocket useEffect cleanup
+
     useEffect(() => {
         const initWebSocket = async () => {
             try {
@@ -216,18 +678,49 @@ export default function OrderEntryPage() {
                     (msg: string) => {
                         try {
                             const data = JSON.parse(msg);
-                            console.log(`Order Update:`, data);
+                            if (data.type === "order_book_update") {
+                                // Transform the data to match the expected structure
+                                const transformedData = {
+                                    code: data.code,
+                                    timestamp: data.timestamp,
+                                    bid: data.bid.map((item: any[]) => ({
+                                        price: item[0],
+                                        volume: item[1],
+                                    })),
+                                    ask: data.ask.map((item: any[]) => ({
+                                        price: item[0],
+                                        volume: item[1],
+                                    })),
+                                };
 
-                            if (data.type === "order_update") {
+                                setOrderBookData(transformedData);
+                                setIsLoadingOrderBook(false);
+
+                                // If we get order book data with valid bid/ask prices, update the form values
+                                if (
+                                    data.bid?.length > 0 &&
+                                    data.ask?.length > 0
+                                ) {
+                                    const topBid = data.bid[0][0]; // First element is price
+                                    const topAsk = data.ask[0][0]; // First element is price
+
+                                    if (topBid > 0 && topAsk > 0) {
+                                        setBid(topBid);
+                                        setAsk(topAsk);
+                                    }
+                                }
+                            } else if (data.type === "order_update") {
                                 const orderUpdate = data.data;
 
                                 // Check if this is a terminal status
+
                                 const isTerminalStatus = [
-                                    "FILLED",
+                                    "FILLED_ALL",
                                     "CANCELLED_ALL",
                                     "FAILED",
                                 ].includes(orderUpdate.order_status);
 
+                                console.log(orderUpdate.order_status);
                                 // Update active orders
                                 setActiveOrders((prevOrders) => {
                                     const existingOrderIndex =
@@ -314,11 +807,24 @@ export default function OrderEntryPage() {
 
         initWebSocket();
 
+        // Set up orderbook connection and store the cleanup function
+        // Now returns a normal function, not a Promise
+        const orderBookCleanup = setupOrderBookSubscription(selectedStock);
+
         return () => {
-            wsManager.disconnectConnection(ORDERS_WS_CONNECTION_ID);
-            setIsConnected(false);
+            // Cleanup all WebSocket connections
+            try {
+                wsManager.disconnectConnection(ORDERS_WS_CONNECTION_ID);
+                wsManager.disconnectConnection(ORDERBOOK_WS_CONNECTION_ID);
+                setIsConnected(false);
+                setIsOrderBookConnected(false);
+
+                // Execute the cleanup function
+            } catch (error) {
+                console.error("Error during WebSocket cleanup:", error);
+            }
         };
-    }, [wsManager]);
+    }, [wsManager, selectedStock]);
 
     // Fetch order history when date range changes
     useEffect(() => {
@@ -337,8 +843,15 @@ export default function OrderEntryPage() {
         setMarket(value);
         // Set the first stock of selected market as default
         if (STOCKS[value as keyof typeof STOCKS]?.length > 0) {
-            setSelectedStock(STOCKS[value as keyof typeof STOCKS][0].code);
+            const firstStock = STOCKS[value as keyof typeof STOCKS][0].code;
+            setSelectedStock(firstStock);
         }
+    };
+
+    // Handle stock change
+    const handleStockChange = (value: string) => {
+        setSelectedStock(value);
+        fetchCurrentPositionAndQuote(value);
     };
 
     // Handle order submission
@@ -482,210 +995,387 @@ export default function OrderEntryPage() {
         }
     };
 
+    // Get stock name for display
+    const getStockName = () => {
+        const stockObj = STOCKS[market as keyof typeof STOCKS]?.find(
+            (stock) => stock.code === selectedStock
+        );
+        return stockObj ? stockObj.name : selectedStock;
+    };
+
     return (
         <div className="container mx-auto py-6 space-y-8 bg-background text-foreground">
             <h1 className="text-3xl font-bold">Order Entry</h1>
 
-            {/* Order Entry Card */}
-            <Card className="bg-card text-card-foreground">
-                <CardHeader>
-                    <CardTitle>Order Entry</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-6">
-                    {/* Market and Stock Selection */}
-                    <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                            <label className="text-sm font-medium">
-                                Market
-                            </label>
-                            <Select
-                                value={market}
-                                onValueChange={handleMarketChange}
-                            >
-                                <SelectTrigger>
-                                    <SelectValue placeholder="Select market" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {MARKETS.map((market) => (
-                                        <SelectItem
-                                            key={market.id}
-                                            value={market.id}
-                                        >
-                                            {market.name}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                        </div>
-                        <div className="space-y-2">
-                            <label className="text-sm font-medium">Stock</label>
-                            <Select
-                                value={selectedStock}
-                                onValueChange={setSelectedStock}
-                            >
-                                <SelectTrigger>
-                                    <SelectValue placeholder="Select stock" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {STOCKS[market as keyof typeof STOCKS]?.map(
-                                        (stock) => (
+            {/* Split Order Entry and Order Book */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                {/* Market and Stock Selection - Shared between both sections */}
+                <Card className="col-span-1 lg:col-span-2 bg-card text-card-foreground">
+                    <CardContent className="pt-6">
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-2">
+                                <label className="text-sm font-medium">
+                                    Market
+                                </label>
+                                <Select
+                                    value={market}
+                                    onValueChange={handleMarketChange}
+                                >
+                                    <SelectTrigger>
+                                        <SelectValue placeholder="Select market" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {MARKETS.map((market) => (
+                                            <SelectItem
+                                                key={market.id}
+                                                value={market.id}
+                                            >
+                                                {market.name}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                            <div className="space-y-2">
+                                <label className="text-sm font-medium">
+                                    Stock
+                                </label>
+                                <Select
+                                    value={selectedStock}
+                                    onValueChange={handleStockChange}
+                                >
+                                    <SelectTrigger>
+                                        <SelectValue placeholder="Select stock" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {STOCKS[
+                                            market as keyof typeof STOCKS
+                                        ]?.map((stock) => (
                                             <SelectItem
                                                 key={stock.code}
                                                 value={stock.code}
                                             >
                                                 {stock.name} ({stock.code})
                                             </SelectItem>
-                                        )
-                                    )}
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                        </div>
+                    </CardContent>
+                </Card>
+
+                {/* Order Book Section - Left Side */}
+                <Card className="bg-card text-card-foreground">
+                    <CardHeader>
+                        <CardTitle>Order Book: {getStockName()}</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                        <OrderBookDisplay
+                            orderBookData={orderBookData}
+                            isLoading={isLoadingOrderBook}
+                            onPriceSelect={handlePriceSelect}
+                        />
+
+                        {/* Connection Status */}
+                        <div className="flex items-center space-x-2 text-sm mt-4">
+                            <div
+                                className={`w-3 h-3 rounded-full ${
+                                    isOrderBookConnected
+                                        ? "bg-green-500"
+                                        : "bg-red-500"
+                                }`}
+                            ></div>
+                            <span>
+                                {isOrderBookConnected
+                                    ? "Connected to market data"
+                                    : "Disconnected from market data"}
+                            </span>
+                        </div>
+                    </CardContent>
+                </Card>
+
+                {/* Order Entry Section - Right Side */}
+                <Card className="bg-card text-card-foreground">
+                    <CardHeader>
+                        <CardTitle>Place Order</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-6">
+                        {/* Current Position Information */}
+                        {currentPosition && (
+                            <div className="p-3 bg-muted rounded-md">
+                                <h3 className="text-sm font-semibold mb-2">
+                                    Current Position
+                                </h3>
+                                <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+                                    <div>
+                                        Quantity:{" "}
+                                        <span className="font-medium">
+                                            {currentPosition.quantity}
+                                        </span>
+                                    </div>
+                                    <div>
+                                        Available to Sell:{" "}
+                                        <span className="font-medium">
+                                            {currentPosition.can_sell_qty ??
+                                                currentPosition.quantity}
+                                        </span>
+                                    </div>
+                                    <div>
+                                        Cost Basis:{" "}
+                                        <span className="font-medium">
+                                            $
+                                            {currentPosition.avg_price.toFixed(
+                                                2
+                                            )}
+                                        </span>
+                                    </div>
+                                    <div>
+                                        Market Value:{" "}
+                                        <span className="font-medium">
+                                            $
+                                            {currentPosition.market_value.toFixed(
+                                                2
+                                            )}
+                                        </span>
+                                    </div>
+                                    <div>
+                                        P&L:{" "}
+                                        <span
+                                            className={`font-medium ${
+                                                currentPosition.unrealized_pl >=
+                                                0
+                                                    ? "text-green-500"
+                                                    : "text-red-500"
+                                            }`}
+                                        >
+                                            $
+                                            {currentPosition.unrealized_pl.toFixed(
+                                                2
+                                            )}{" "}
+                                            (
+                                            {currentPosition.pl_ratio.toFixed(
+                                                2
+                                            )}
+                                            %)
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Strategy Selection */}
+                        <div className="space-y-2">
+                            <label className="text-sm font-medium">
+                                Trading Strategy
+                            </label>
+                            <Select
+                                value={selectedStrategy}
+                                onValueChange={setSelectedStrategy}
+                            >
+                                <SelectTrigger>
+                                    <SelectValue placeholder="Select strategy" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {STRATEGIES.map((strategy) => (
+                                        <SelectItem
+                                            key={strategy.id}
+                                            value={strategy.id}
+                                        >
+                                            {strategy.name}
+                                        </SelectItem>
+                                    ))}
                                 </SelectContent>
                             </Select>
                         </div>
-                    </div>
 
-                    {/* Strategy Selection */}
-                    <div className="space-y-2">
-                        <label className="text-sm font-medium">
-                            Trading Strategy
-                        </label>
-                        <Select
-                            value={selectedStrategy}
-                            onValueChange={setSelectedStrategy}
-                        >
-                            <SelectTrigger>
-                                <SelectValue placeholder="Select strategy" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                {STRATEGIES.map((strategy) => (
-                                    <SelectItem
-                                        key={strategy.id}
-                                        value={strategy.id}
-                                    >
-                                        {strategy.name}
-                                    </SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
-                    </div>
-
-                    {/* Quantity Input */}
-                    <div className="space-y-2">
-                        <label
-                            htmlFor="quantity"
-                            className="text-sm font-medium"
-                        >
-                            Quantity
-                        </label>
-                        <Input
-                            id="quantity"
-                            type="number"
-                            min="1"
-                            value={quantity}
-                            onChange={(e) =>
-                                setQuantity(Number(e.target.value))
-                            }
-                            className="w-full bg-input text-foreground"
-                        />
-                    </div>
-
-                    {/* Price Slider and Inputs */}
-                    <div className="space-y-4">
-                        <div className="flex justify-between text-sm text-muted-foreground">
-                            <span>Bid: ${bid.toFixed(2)}</span>
-                            <span>Mid: ${mid.toFixed(2)}</span>
-                            <span>Ask: ${ask.toFixed(2)}</span>
-                        </div>
-                        <div className="relative">
-                            <div className="absolute left-1/2 transform -translate-x-1/2 -top-6 text-xs text-foreground">
-                                Position: ${positionPrice.toFixed(2)}
-                            </div>
-                            <Slider
-                                value={[position]}
-                                onValueChange={updatePosition}
-                                max={100}
-                                step={1}
-                                className="w-full"
+                        {/* Quantity Input */}
+                        <div className="space-y-2">
+                            <label
+                                htmlFor="quantity"
+                                className="text-sm font-medium"
+                            >
+                                Quantity
+                            </label>
+                            <Input
+                                id="quantity"
+                                type="number"
+                                min="1"
+                                value={quantity}
+                                onChange={(e) =>
+                                    setQuantity(Number(e.target.value))
+                                }
+                                className="w-full bg-input text-foreground"
                             />
                         </div>
-                        <div className="grid grid-cols-2 gap-4">
-                            <div className="space-y-2">
-                                <label
-                                    htmlFor="bid"
-                                    className="text-sm font-medium"
-                                >
-                                    Bid
-                                </label>
-                                <Input
-                                    id="bid"
-                                    type="number"
-                                    step="0.01"
-                                    value={bid}
-                                    onChange={(e) =>
-                                        setBid(Number(e.target.value))
-                                    }
-                                    className="w-full bg-input text-foreground"
+
+                        {/* Price Slider and Inputs */}
+                        <div className="space-y-4">
+                            <div className="flex justify-between text-sm text-muted-foreground">
+                                <span>Bid: ${bid.toFixed(2)}</span>
+                                <span>Mid: ${mid.toFixed(2)}</span>
+                                <span>Ask: ${ask.toFixed(2)}</span>
+                            </div>
+                            <div className="relative">
+                                <div className="absolute left-1/2 transform -translate-x-1/2 -top-6 text-xs text-foreground">
+                                    Position: ${positionPrice.toFixed(2)}
+                                </div>
+                                <Slider
+                                    value={[position]}
+                                    onValueChange={updatePosition}
+                                    max={100}
+                                    step={1}
+                                    className="w-full"
                                 />
                             </div>
-                            <div className="space-y-2">
-                                <label
-                                    htmlFor="ask"
-                                    className="text-sm font-medium"
-                                >
-                                    Ask
-                                </label>
-                                <Input
-                                    id="ask"
-                                    type="number"
-                                    step="0.01"
-                                    value={ask}
-                                    onChange={(e) =>
-                                        setAsk(Number(e.target.value))
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="space-y-2">
+                                    <div className="flex justify-between items-center">
+                                        <label
+                                            htmlFor="bid"
+                                            className="text-sm font-medium"
+                                        >
+                                            Bid
+                                        </label>
+                                        <div className="flex space-x-1">
+                                            <Button
+                                                size="icon"
+                                                variant="outline"
+                                                className="h-6 w-6"
+                                                onClick={() => adjustBid(-0.01)}
+                                            >
+                                                <Minus className="h-3 w-3" />
+                                            </Button>
+                                            <Button
+                                                size="icon"
+                                                variant="outline"
+                                                className="h-6 w-6"
+                                                onClick={() => adjustBid(0.01)}
+                                            >
+                                                <Plus className="h-3 w-3" />
+                                            </Button>
+                                        </div>
+                                    </div>
+                                    <Input
+                                        id="bid"
+                                        type="number"
+                                        step="0.01"
+                                        value={bid}
+                                        onChange={(e) =>
+                                            setBid(Number(e.target.value))
+                                        }
+                                        className="w-full bg-input text-foreground"
+                                    />
+                                </div>
+                                <div className="space-y-2">
+                                    <div className="flex justify-between items-center">
+                                        <label
+                                            htmlFor="ask"
+                                            className="text-sm font-medium"
+                                        >
+                                            Ask
+                                        </label>
+                                        <div className="flex space-x-1">
+                                            <Button
+                                                size="icon"
+                                                variant="outline"
+                                                className="h-6 w-6"
+                                                onClick={() => adjustAsk(-0.01)}
+                                            >
+                                                <Minus className="h-3 w-3" />
+                                            </Button>
+                                            <Button
+                                                size="icon"
+                                                variant="outline"
+                                                className="h-6 w-6"
+                                                onClick={() => adjustAsk(0.01)}
+                                            >
+                                                <Plus className="h-3 w-3" />
+                                            </Button>
+                                        </div>
+                                    </div>
+                                    <Input
+                                        id="ask"
+                                        type="number"
+                                        step="0.01"
+                                        value={ask}
+                                        onChange={(e) =>
+                                            setAsk(Number(e.target.value))
+                                        }
+                                        className="w-full bg-input text-foreground"
+                                    />
+                                </div>
+                            </div>
+                            <div className="flex justify-center">
+                                <Button
+                                    variant="secondary"
+                                    size="sm"
+                                    className="flex items-center"
+                                    onClick={() => {
+                                        fetchCurrentPositionAndQuote(
+                                            selectedStock
+                                        );
+                                        setupOrderBookSubscription(
+                                            selectedStock
+                                        );
+                                    }}
+                                    disabled={
+                                        isLoadingQuote || isLoadingOrderBook
                                     }
-                                    className="w-full bg-input text-foreground"
-                                />
+                                >
+                                    <RefreshCw
+                                        className={`h-4 w-4 mr-2 ${
+                                            isLoadingQuote || isLoadingOrderBook
+                                                ? "animate-spin"
+                                                : ""
+                                        }`}
+                                    />
+                                    Refresh Market Data
+                                </Button>
                             </div>
                         </div>
-                    </div>
 
-                    {/* Action Buttons */}
-                    <div className="grid grid-cols-3 gap-4">
-                        <Button
-                            className="w-full bg-green-600 hover:bg-green-700"
-                            onClick={() => handleOrderSubmit("BUY")}
-                            disabled={selectedStrategy !== "manual"}
-                        >
-                            Buy
-                        </Button>
-                        <Button
-                            className="w-full bg-red-600 hover:bg-red-700"
-                            onClick={() => handleOrderSubmit("SELL")}
-                            disabled={selectedStrategy !== "manual"}
-                        >
-                            Sell
-                        </Button>
-                        <Button
-                            className="w-full bg-blue-600 hover:bg-blue-700"
-                            onClick={executeStrategy}
-                            disabled={selectedStrategy === "manual"}
-                        >
-                            Execute Strategy
-                        </Button>
-                    </div>
+                        {/* Action Buttons */}
+                        <div className="grid grid-cols-3 gap-4">
+                            <Button
+                                className="w-full bg-green-600 hover:bg-green-700"
+                                onClick={() => handleOrderSubmit("BUY")}
+                                disabled={selectedStrategy !== "manual"}
+                            >
+                                Buy
+                            </Button>
+                            <Button
+                                className="w-full bg-red-600 hover:bg-red-700"
+                                onClick={() => handleOrderSubmit("SELL")}
+                                disabled={selectedStrategy !== "manual"}
+                            >
+                                Sell
+                            </Button>
+                            <Button
+                                className="w-full bg-blue-600 hover:bg-blue-700"
+                                onClick={executeStrategy}
+                                disabled={selectedStrategy === "manual"}
+                            >
+                                Execute Strategy
+                            </Button>
+                        </div>
 
-                    {/* Connection Status */}
-                    <div className="flex items-center space-x-2 text-sm">
-                        <div
-                            className={`w-3 h-3 rounded-full ${
-                                isConnected ? "bg-green-500" : "bg-red-500"
-                            }`}
-                        ></div>
-                        <span>
-                            {isConnected
-                                ? "Connected to order updates"
-                                : "Disconnected"}
-                        </span>
-                    </div>
-                </CardContent>
-            </Card>
+                        {/* Connection Status */}
+                        <div className="flex items-center space-x-2 text-sm">
+                            <div
+                                className={`w-3 h-3 rounded-full ${
+                                    isConnected ? "bg-green-500" : "bg-red-500"
+                                }`}
+                            ></div>
+                            <span>
+                                {isConnected
+                                    ? "Connected to order updates"
+                                    : "Disconnected"}
+                            </span>
+                        </div>
+                    </CardContent>
+                </Card>
+            </div>
 
             {/* Active Orders Section */}
             <div className="space-y-3">
@@ -714,7 +1404,7 @@ export default function OrderEntryPage() {
                         </CardHeader>
                         <CardContent className="space-y-6">
                             {/* Date Range Selection */}
-                            <div className="flex space-x-4">
+                            <div className="flex flex-col space-y-4 md:flex-row md:space-y-0 md:space-x-4">
                                 <div className="space-y-2">
                                     <label className="text-sm font-medium">
                                         Start Date
@@ -723,7 +1413,7 @@ export default function OrderEntryPage() {
                                         <PopoverTrigger asChild>
                                             <Button
                                                 variant="outline"
-                                                className="w-[240px] justify-start text-left font-normal"
+                                                className="w-full md:w-[240px] justify-start text-left font-normal"
                                             >
                                                 <CalendarIcon className="mr-2 h-4 w-4" />
                                                 {startDate
@@ -750,7 +1440,7 @@ export default function OrderEntryPage() {
                                         <PopoverTrigger asChild>
                                             <Button
                                                 variant="outline"
-                                                className="w-[240px] justify-start text-left font-normal"
+                                                className="w-full md:w-[240px] justify-start text-left font-normal"
                                             >
                                                 <CalendarIcon className="mr-2 h-4 w-4" />
                                                 {endDate
@@ -770,16 +1460,16 @@ export default function OrderEntryPage() {
                                 </div>
 
                                 <div className="self-end">
-                                    <Button onClick={fetchOrderHistory}>
+                                    <Button
+                                        onClick={fetchOrderHistory}
+                                        className="w-full md:w-auto"
+                                    >
                                         Refresh Orders
                                     </Button>
                                 </div>
                             </div>
 
-                            <OrderHistoryTable
-                                orders={historicalOrders}
-                                onCancelOrder={handleCancelOrder}
-                            />
+                            <OrderHistoryTable orders={historicalOrders} />
                         </CardContent>
                     </Card>
                 </TabsContent>

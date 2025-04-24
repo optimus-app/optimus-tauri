@@ -7,22 +7,22 @@ use tauri::{Emitter, EventTarget, Listener, Manager};
 lazy_static! {
     static ref window_names: HashMap<String, String> = {
         let mut m = HashMap::new();
-        m.insert("im".to_string(), "http://localhost:3000/im".to_string());
+        m.insert("im".to_string(), "im.html".to_string());
         m.insert(
             "dashboard".to_string(),
-            "http://localhost:3000/dashboard".to_string(),
+            "dashboard.html".to_string(),
         );
         m.insert(
             "trade-exec".to_string(),
-            "http://localhost:3000/orders".to_string(),
+            "orders.html".to_string(),
         );
         m.insert(
             "backtest".to_string(),
-            "http://localhost:3000/backtest".to_string(),
+            "backtest.html".to_string(),
         );
         m.insert(
             "ml".to_string(),
-            "http://localhost:3000/ml-charts".to_string(),
+            "ml-charts.html".to_string(),
         );
         m
     };
