@@ -150,6 +150,8 @@ const fetchStockPosition = async (
 };
 
 // Order Book display component
+// Replace the OrderBookDisplay component with this implementation
+
 const OrderBookDisplay = ({
     orderBookData,
     isLoading,
@@ -211,80 +213,116 @@ const OrderBookDisplay = ({
         ? getTimeAgo(orderBookData.timestamp)
         : "unknown";
 
+    // Format number with k/m suffixes
+    const formatNumber = (num: number) => {
+        if (num >= 1000000) {
+            return (num / 1000000).toFixed(2) + "m";
+        }
+        if (num >= 1000) {
+            return (num / 1000).toFixed(2) + "k";
+        }
+        return num.toString();
+    };
+
+    // Get asks (sells) in reverse order (highest to lowest)
+    const asks = [...(orderBookData.ask || [])].slice(0, 5).reverse();
+
+    // Get bids (buys) in order (highest to lowest)
+    const bids = [...(orderBookData.bid || [])].slice(0, 5);
+
     return (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Ask Levels (Sell) - Displayed in reverse order */}
-            <div className="space-y-1 order-2 md:order-1">
-                <div className="text-sm font-medium text-red-500 mb-2">
-                    Ask (Sell)
-                </div>
-                {orderBookData.ask?.slice(0, 5).map((level, index) => (
+        <div className="flex flex-col">
+            {/* Header row */}
+            <div className="grid grid-cols-4 text-xs font-medium text-muted-foreground border-b pb-1 mb-1">
+                <div>PRICE</div>
+                <div className="text-right">SIZE</div>
+                <div className="text-right">BUYS</div>
+                <div className="text-right">SELLS</div>
+            </div>
+
+            {/* Ask/Sell Rows */}
+            <div className="mb-2">
+                {asks.map((level, index) => (
                     <div
                         key={`ask-${index}`}
-                        className="flex items-center space-x-2 cursor-pointer hover:bg-muted p-1 rounded"
+                        className="grid grid-cols-4 py-0.5 cursor-pointer hover:bg-muted/30 text-sm bg-red-900/20"
                         onClick={() => onPriceSelect(level.price)}
                     >
-                        <div className="text-sm font-medium text-red-500 w-20">
-                            ${level.price.toFixed(2)}
+                        <div className="text-red-400 font-medium">
+                            {level.price.toFixed(2)}
                         </div>
-                        <div className="text-sm text-muted-foreground w-20 text-right">
-                            {level.volume}
+                        <div className="text-right">
+                            {formatNumber(level.volume)}
                         </div>
-                        <div className="flex-1">
-                            <div className="relative h-3">
-                                <Progress
-                                    value={(level.volume / maxVolume) * 100}
-                                    className="h-full bg-muted"
-                                    // indicatorClassName="bg-red-200"
-                                />
-                            </div>
+                        <div className="text-right text-green-400">-</div>
+                        <div className="text-right text-red-400">
+                            {formatNumber(level.volume)}
                         </div>
                     </div>
                 ))}
-                {(!orderBookData.ask || orderBookData.ask.length === 0) && (
-                    <div className="text-sm text-muted-foreground italic">
+                {asks.length === 0 && (
+                    <div className="text-sm text-muted-foreground italic py-2 text-center">
                         No ask data available
                     </div>
                 )}
             </div>
 
-            {/* Bid Levels (Buy) */}
-            <div className="space-y-1 order-3 md:order-2">
-                <div className="text-sm font-medium text-green-500 mb-2">
-                    Bid (Buy)
-                </div>
-                {orderBookData.bid?.slice(0, 5).map((level, index) => (
+            {/* Spread/Mid Price */}
+            <div className="text-center py-1 text-xs text-muted-foreground border-y">
+                {orderBookData.ask &&
+                orderBookData.ask.length > 0 &&
+                orderBookData.bid &&
+                orderBookData.bid.length > 0 ? (
+                    <>
+                        {/* Calculate and display the spread */}
+                        Spread: $
+                        {(
+                            orderBookData.ask[0].price -
+                            orderBookData.bid[0].price
+                        ).toFixed(2)}
+                        (
+                        {(
+                            ((orderBookData.ask[0].price -
+                                orderBookData.bid[0].price) /
+                                orderBookData.bid[0].price) *
+                            100
+                        ).toFixed(2)}
+                        %)
+                    </>
+                ) : (
+                    "No spread data"
+                )}
+            </div>
+
+            {/* Bid/Buy Rows */}
+            <div className="mt-2">
+                {bids.map((level, index) => (
                     <div
                         key={`bid-${index}`}
-                        className="flex items-center space-x-2 cursor-pointer hover:bg-muted p-1 rounded"
+                        className="grid grid-cols-4 py-0.5 cursor-pointer hover:bg-muted/30 text-sm bg-blue-900/20"
                         onClick={() => onPriceSelect(level.price)}
                     >
-                        <div className="text-sm font-medium text-green-500 w-20">
-                            ${level.price.toFixed(2)}
+                        <div className="text-green-400 font-medium">
+                            {level.price.toFixed(2)}
                         </div>
-                        <div className="text-sm text-muted-foreground w-20 text-right">
-                            {level.volume}
+                        <div className="text-right">
+                            {formatNumber(level.volume)}
                         </div>
-                        <div className="flex-1">
-                            <div className="relative h-3">
-                                <Progress
-                                    value={(level.volume / maxVolume) * 100}
-                                    className="h-full bg-muted"
-                                    // indicatorClassName="bg-green-200"
-                                />
-                            </div>
+                        <div className="text-right text-green-400">
+                            {formatNumber(level.volume)}
                         </div>
+                        <div className="text-right text-red-400">-</div>
                     </div>
                 ))}
-                {(!orderBookData.bid || orderBookData.bid.length === 0) && (
-                    <div className="text-sm text-muted-foreground italic">
+                {bids.length === 0 && (
+                    <div className="text-sm text-muted-foreground italic py-2 text-center">
                         No bid data available
                     </div>
                 )}
             </div>
 
-            {/* Timestamp - Full width across bottom */}
-            <div className="col-span-1 md:col-span-2 text-xs text-muted-foreground text-right order-1 md:order-3">
+            {/* Timestamp */}
+            <div className="text-xs text-muted-foreground text-right mt-2">
                 Last updated: {timeAgo}
             </div>
         </div>
@@ -379,7 +417,7 @@ export default function OrderEntryPage() {
             // Set up a message handler for the connection
             wsManager.addSubscriptionToConnection(
                 ORDERBOOK_WS_CONNECTION_ID,
-                "message", // Generic message handler instead of a specific subscription path
+                "message",
                 (msg: string) => {
                     try {
                         const data = JSON.parse(msg);
@@ -390,13 +428,27 @@ export default function OrderEntryPage() {
                             data.type === "order_book_update" &&
                             data.code === stockCode
                         ) {
-                            setOrderBookData(data);
+                            // Transform the data to match the expected structure
+                            const transformedData = {
+                                code: data.code,
+                                timestamp: data.timestamp,
+                                bid: data.bid.map((item: any[]) => ({
+                                    price: item[0],
+                                    volume: item[1],
+                                })),
+                                ask: data.ask.map((item: any[]) => ({
+                                    price: item[0],
+                                    volume: item[1],
+                                })),
+                            };
+
+                            setOrderBookData(transformedData);
                             setIsLoadingOrderBook(false);
 
                             // If we get order book data with valid bid/ask prices, update the form values
                             if (data.bid?.length > 0 && data.ask?.length > 0) {
-                                const topBid = data.bid[0].price;
-                                const topAsk = data.ask[0].price;
+                                const topBid = data.bid[0][0]; // First element is price
+                                const topAsk = data.ask[0][0]; // First element is price
 
                                 if (topBid > 0 && topAsk > 0) {
                                     setBid(topBid);
@@ -583,7 +635,7 @@ export default function OrderEntryPage() {
 
                 response.orders.forEach((order: Order) => {
                     if (
-                        ["FILLED", "CANCELLED_ALL", "FAILED"].includes(
+                        ["FILLED_ALL", "CANCELLED_ALL", "FAILED"].includes(
                             order.order_status
                         )
                     ) {
@@ -626,18 +678,49 @@ export default function OrderEntryPage() {
                     (msg: string) => {
                         try {
                             const data = JSON.parse(msg);
-                            console.log(`Order Update:`, data);
+                            if (data.type === "order_book_update") {
+                                // Transform the data to match the expected structure
+                                const transformedData = {
+                                    code: data.code,
+                                    timestamp: data.timestamp,
+                                    bid: data.bid.map((item: any[]) => ({
+                                        price: item[0],
+                                        volume: item[1],
+                                    })),
+                                    ask: data.ask.map((item: any[]) => ({
+                                        price: item[0],
+                                        volume: item[1],
+                                    })),
+                                };
 
-                            if (data.type === "order_update") {
+                                setOrderBookData(transformedData);
+                                setIsLoadingOrderBook(false);
+
+                                // If we get order book data with valid bid/ask prices, update the form values
+                                if (
+                                    data.bid?.length > 0 &&
+                                    data.ask?.length > 0
+                                ) {
+                                    const topBid = data.bid[0][0]; // First element is price
+                                    const topAsk = data.ask[0][0]; // First element is price
+
+                                    if (topBid > 0 && topAsk > 0) {
+                                        setBid(topBid);
+                                        setAsk(topAsk);
+                                    }
+                                }
+                            } else if (data.type === "order_update") {
                                 const orderUpdate = data.data;
 
                                 // Check if this is a terminal status
+
                                 const isTerminalStatus = [
-                                    "FILLED",
+                                    "FILLED_ALL",
                                     "CANCELLED_ALL",
                                     "FAILED",
                                 ].includes(orderUpdate.order_status);
 
+                                console.log(orderUpdate.order_status);
                                 // Update active orders
                                 setActiveOrders((prevOrders) => {
                                     const existingOrderIndex =
@@ -1386,10 +1469,7 @@ export default function OrderEntryPage() {
                                 </div>
                             </div>
 
-                            <OrderHistoryTable
-                                orders={historicalOrders}
-                                onCancelOrder={handleCancelOrder}
-                            />
+                            <OrderHistoryTable orders={historicalOrders} />
                         </CardContent>
                     </Card>
                 </TabsContent>
