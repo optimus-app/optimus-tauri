@@ -75,13 +75,25 @@ jobs:
                   sudo apt-get update
                   sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 
-            - name: transform URLs for production
+            - name: transform URLs for production (Windows)
+              if: matrix.platform == 'windows-latest'
+              shell: bash
               run: |
-                  if [[ "${{ matrix.platform }}" == "windows-latest" ]]; then
-                    sed -i 's|"http://localhost:3000/\([^"]*\)"|"\1.html"|g' src-tauri/src/lib.rs
-                  else
-                    sed -i '' 's|"http://localhost:3000/\([^"]*\)"|"\1.html"|g' src-tauri/src/lib.rs
-                  fi
+                  sed -i 's|"http://localhost:3000/\([^"]*\)"|"\1.html"|g' src-tauri/src/lib.rs
+                  echo "Modified lib.rs for production build:"
+                  cat src-tauri/src/lib.rs
+
+            - name: transform URLs for production (macOS)
+              if: matrix.platform == 'macos-latest'
+              run: |
+                  sed -i '' 's|"http://localhost:3000/\([^"]*\)"|"\1.html"|g' src-tauri/src/lib.rs
+                  echo "Modified lib.rs for production build:"
+                  cat src-tauri/src/lib.rs
+
+            - name: transform URLs for production (Ubuntu)
+              if: matrix.platform == 'ubuntu-22.04'
+              run: |
+                  sed -i 's|"http://localhost:3000/\([^"]*\)"|"\1.html"|g' src-tauri/src/lib.rs
                   echo "Modified lib.rs for production build:"
                   cat src-tauri/src/lib.rs
 
